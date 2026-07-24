@@ -40,7 +40,6 @@ struct _draw_command_t
     u32      index_count;
     u32      instance_count;
 
-    // TODO dynamic buffer draws
 };
 
 #endif

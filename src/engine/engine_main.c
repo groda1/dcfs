@@ -16,7 +16,7 @@
 #define MAX_FRAMETIME_SAMPLES   512
 #define SAMPLE_WINDOW_S         0.2f
 
-#define FPS_LIMIT               500         // 0 = uncapped
+#define FPS_LIMIT               240         // 0 = uncapped
 
 arena_t *g_engine_arena = NULL;
 arena_t *g_scratch = NULL;

@@ -559,6 +559,7 @@ static void draw_grid(void)
     mat4 rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
     u64 instance_count = 0;
 
+    // TODO: this can be heavily optimized
     i32 start_x =   ClampBot(0, g_game.player_pos_x - 20);
     i32 end_x =     ClampTop(g_game.player_pos_x + 20, GRID_WIDTH);
     i32 start_y =   ClampBot(0, g_game.player_pos_y - 12);
