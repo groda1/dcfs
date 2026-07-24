@@ -603,6 +603,7 @@ static void draw_player(void)
                     ),
         .color = PLAYER_COLOR,
     };
+
     Renderer_DrawModel(SWAPCHAIN_PASS_HANDLE, g_game.player_pipeline,
                       &push_constant, g_game.player_model);
 }
