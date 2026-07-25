@@ -1,5 +1,4 @@
 - animation looping + default animations (idle)
-- remove shaders from base dir
 - should render pass be tied directly to the pipeline, get rid of pass as parameter to draw-calls
 - console
     - mouse scroll

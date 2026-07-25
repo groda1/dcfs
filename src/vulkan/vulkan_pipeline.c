@@ -8,15 +8,27 @@
 #include "vulkan_texture.h"
 #include <vulkan/vulkan_core.h>
 
+#ifdef DEBUG_BUILD
+#include "vulkan_spirv.h"
+#endif
+
 static VkFormat vertex_format_to_vk(vertex_format_t format);
 static VkShaderStageFlags uniform_stage_to_vk(uniform_stage_t stage);
 static bool create_shader_module(shader_code_t shader, VkShaderModule *module_out);
 static bool create_descriptor_sets(const pipeline_config_t *config, pipeline_t *pipeline);
+#ifdef DEBUG_BUILD
+static bool validate_vertex_inputs(const pipeline_config_t *config, u32 stream_count);
+#endif
 
 bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
                            const pipeline_config_t *config, pipeline_t *pipeline_out)
 {
-    Assert(config->vertex_attribute_count <= MAX_VERTEX_ATTRIBUTES);
+    const vertex_layout_t *vertex_layout = config->vertex_layout;
+    u32 stream_count = Max(config->vertex_streams, 1u);
+
+    Assert(vertex_layout != NULL);
+    Assert(vertex_layout->attribute_count <= MAX_VERTEX_ATTRIBUTES);
+    Assert(stream_count <= MAX_VERTEX_BINDINGS);
 
     bool result = false;
 
@@ -25,6 +37,15 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
     VkShaderModule vertex_shader = VK_NULL_HANDLE;
     VkShaderModule fragment_shader = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
+
+#ifdef DEBUG_BUILD
+    /* catch layout/shader mismatches before anything is created: a vertex
+       attribute the shader expects but the pipeline never declares would
+       silently read zero on every vertex. debug builds only, like the
+       validation layers */
+    if (!validate_vertex_inputs(config, stream_count))
+        return false;
+#endif
 
     if (!create_shader_module(config->vertex_shader, &vertex_shader) ||
         !create_shader_module(config->fragment_shader, &fragment_shader))
@@ -48,40 +69,38 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
         },
     };
 
-    /* the binding count is derived from the attributes so it cannot drift
-       out of sync with them; every draw through the pipeline must bind that
-       many vertex buffers */
-    u32 vertex_binding_count = 1;
-    VkVertexInputAttributeDescription vertex_attributes[MAX_VERTEX_ATTRIBUTES];
-    for (u32 i = 0; i < config->vertex_attribute_count; i++)
-    {
-        Assert(config->vertex_attributes[i].binding < MAX_VERTEX_BINDINGS);
-        vertex_binding_count = Max(vertex_binding_count,
-                                   config->vertex_attributes[i].binding + 1);
-
-        vertex_attributes[i] = (VkVertexInputAttributeDescription){
-            .location = config->vertex_attributes[i].location,
-            .binding = config->vertex_attributes[i].binding,
-            .format = vertex_format_to_vk(config->vertex_attributes[i].format),
-            .offset = config->vertex_attributes[i].offset,
-        };
-    }
-
+    /* one binding per vertex stream, each carrying the full layout; shader
+       locations continue across streams (stream s attribute i = location
+       s * attribute_count + i) */
     VkVertexInputBindingDescription vertex_bindings[MAX_VERTEX_BINDINGS];
-    for (u32 i = 0; i < vertex_binding_count; i++)
+    VkVertexInputAttributeDescription vertex_attributes[MAX_VERTEX_BINDINGS *
+                                                        MAX_VERTEX_ATTRIBUTES];
+    u32 vertex_attribute_count = 0;
+
+    for (u32 stream = 0; stream < stream_count; stream++)
     {
-        vertex_bindings[i] = (VkVertexInputBindingDescription){
-            .binding = i,
-            .stride = config->vertex_stride,
+        vertex_bindings[stream] = (VkVertexInputBindingDescription){
+            .binding = stream,
+            .stride = vertex_layout->stride,
             .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
         };
+
+        for (u32 i = 0; i < vertex_layout->attribute_count; i++)
+        {
+            vertex_attributes[vertex_attribute_count++] = (VkVertexInputAttributeDescription){
+                .location = stream * vertex_layout->attribute_count + i,
+                .binding = stream,
+                .format = vertex_format_to_vk(vertex_layout->attributes[i].format),
+                .offset = vertex_layout->attributes[i].offset,
+            };
+        }
     }
 
     VkPipelineVertexInputStateCreateInfo vertex_input_state = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = vertex_binding_count,
+        .vertexBindingDescriptionCount = stream_count,
         .pVertexBindingDescriptions = vertex_bindings,
-        .vertexAttributeDescriptionCount = config->vertex_attribute_count,
+        .vertexAttributeDescriptionCount = vertex_attribute_count,
         .pVertexAttributeDescriptions = vertex_attributes,
     };
 
@@ -214,7 +233,7 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
     pipeline_out->vk_pipeline = vk_pipeline;
     pipeline_out->layout = layout;
     pipeline_out->push_constant_size = config->push_constant_size;
-    MemoryCopyStruct(&pipeline_out->config, config);
+    pipeline_out->vertex_binding_count = stream_count;
     layout = VK_NULL_HANDLE;
 
     result = true;
@@ -350,6 +369,63 @@ static bool create_descriptor_sets(const pipeline_config_t *config, pipeline_t *
 
     return true;
 }
+
+#ifdef DEBUG_BUILD
+/* compares the vertex shader's reflected inputs against the configured
+   layout x streams; any mismatch fails pipeline creation so a broken
+   config can never render silently wrong */
+static bool validate_vertex_inputs(const pipeline_config_t *config, u32 stream_count)
+{
+    const vertex_layout_t *layout = config->vertex_layout;
+    u32 expected_count = layout->attribute_count * stream_count;
+
+    spirv_vertex_input_t inputs[MAX_VERTEX_BINDINGS * MAX_VERTEX_ATTRIBUTES];
+    u32 input_count = 0;
+    if (!VulkanSpirv_ReflectVertexInputs(config->vertex_shader, inputs,
+                                         ArrayCount(inputs), &input_count))
+    {
+        Log(ERROR, "pipeline '%s': failed to reflect the vertex shader", config->name);
+        return false;
+    }
+
+    bool consumed[MAX_VERTEX_BINDINGS * MAX_VERTEX_ATTRIBUTES] = {0};
+    bool valid = true;
+
+    for (u32 i = 0; i < input_count; i++)
+    {
+        const spirv_vertex_input_t *input = &inputs[i];
+
+        if (input->location >= expected_count)
+        {
+            Log(ERROR, "pipeline '%s': shader input location %u has no vertex attribute "
+                "(layout provides %u attributes x %u streams)",
+                config->name, input->location, layout->attribute_count, stream_count);
+            valid = false;
+            continue;
+        }
+
+        vertex_format_t expected = layout->attributes[input->location %
+                                                      layout->attribute_count].format;
+        if (input->format != expected)
+        {
+            Log(ERROR, "pipeline '%s': shader input location %u format does not match "
+                "the vertex layout", config->name, input->location);
+            valid = false;
+        }
+
+        consumed[input->location] = true;
+    }
+
+    for (u32 location = 0; location < expected_count; location++)
+    {
+        if (!consumed[location])
+            Log(WARNING, "pipeline '%s': vertex attribute at location %u is not consumed "
+                "by the shader", config->name, location);
+    }
+
+    return valid;
+}
+#endif /* DEBUG_BUILD */
 
 static VkShaderStageFlags uniform_stage_to_vk(uniform_stage_t stage)
 {

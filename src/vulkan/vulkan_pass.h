@@ -3,8 +3,9 @@
 
 #include <vulkan/vulkan_core.h>
 
+#include "memory_arena.h"
 #include "render_types.h"
-#include "vulkan_renderer.h"
+#include "vulkan_types.h"
 
 bool VulkanPass_Init(arena_t *frame_arena);
 bool VulkanPass_Destroy();

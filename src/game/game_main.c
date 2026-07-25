@@ -146,8 +146,7 @@ bool Game_Init(platform_window_t *window)
 
     g_game.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
     g_game.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_QUAD);
-    g_game.vp_uniform = Renderer_CreateUniformBuffer(sizeof(view_projection_t),
-                                                     UNIFORM_STAGE_VERTEX);
+    g_game.vp_uniform = Renderer_CreateUniformBuffer(sizeof(view_projection_t));
     if (g_game.vp_uniform == BUFFER_OBJECT_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create view projection uniform");
@@ -160,20 +159,7 @@ bool Game_Init(platform_window_t *window)
         .vertex_shader = Renderer_LoadShader("shaders/tile.vert.spv"),
         .fragment_shader = Renderer_LoadShader("shaders/tile.frag.spv"),
         .push_constant_size = sizeof(tile_push_constant_t),
-        .vertex_stride = sizeof(normal_vertex_t),
-        .vertex_attribute_count = 2,
-        .vertex_attributes = {
-            {
-                .location = 0,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_vertex_t, position),
-            },
-            {
-                .location = 1,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_vertex_t, normal),
-            },
-        },
+        .vertex_layout = &VERTEX_LAYOUT_NORMAL,
         .uniform_binding_count = 1,
         .uniform_bindings = {
             {
@@ -198,48 +184,8 @@ bool Game_Init(platform_window_t *window)
         .vertex_shader = Renderer_LoadShader("shaders/frog_player.vert.spv"),
         .fragment_shader = Renderer_LoadShader("shaders/frog_player.frag.spv"),
         .push_constant_size = sizeof(model_push_constant_t),
-        .vertex_stride = sizeof(normal_material_vertex_t),
-        .vertex_attribute_count = 6,
-        .vertex_attributes = {
-            /* binding 0 = current keyframe mesh, binding 1 = next keyframe
-               mesh; the shader mixes them by keyframe_t */
-            {
-                .location = 0,
-                .binding = 0,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_material_vertex_t, position),
-            },
-            {
-                .location = 1,
-                .binding = 0,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_material_vertex_t, normal),
-            },
-            {
-                .location = 2,
-                .binding = 0,
-                .format = VERTEX_FORMAT_U32,
-                .offset = offsetof(normal_material_vertex_t, material),
-            },
-            {
-                .location = 3,
-                .binding = 1,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_material_vertex_t, position),
-            },
-            {
-                .location = 4,
-                .binding = 1,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(normal_material_vertex_t, normal),
-            },
-            {
-                .location = 5,
-                .binding = 1,
-                .format = VERTEX_FORMAT_U32,
-                .offset = offsetof(normal_material_vertex_t, material),
-            },
-        },
+        .vertex_layout = &VERTEX_LAYOUT_NORMAL_MATERIAL,
+        .vertex_streams = 2,
         .uniform_binding_count = 1,
         .uniform_bindings = {
             {

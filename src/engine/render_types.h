@@ -42,13 +42,19 @@ typedef enum
 
 typedef struct
 {
-    u32             location;
-    u32             binding; /* which vertex buffer feeds this attribute, in
-                                the order the draw call passes them; all
-                                bindings share vertex_stride */
     vertex_format_t format;
     u32             offset;
 } vertex_attribute_t;
+
+/* describes one vertex struct; declared by the engine next to the struct
+   (see mesh.h). shader input locations are implicit: attribute i is
+   location i, and each extra vertex stream continues the numbering */
+typedef struct
+{
+    u32                stride;
+    u32                attribute_count;
+    vertex_attribute_t attributes[MAX_VERTEX_ATTRIBUTES];
+} vertex_layout_t;
 
 typedef struct
 {
@@ -58,8 +64,7 @@ typedef struct
 
 typedef enum
 {
-    BO_UNIFORM_VERTEX,
-    BO_UNIFORM_FRAGMENT,
+    BO_UNIFORM,
     BO_STORAGE,
 } buffer_object_type_t;
 
@@ -85,9 +90,13 @@ struct _pipeline_config_t
 
     u32 push_constant_size; // 0 = no push constants; visible to vertex and fragment stages
 
-    u32 vertex_stride;
-    u32 vertex_attribute_count;
-    vertex_attribute_t vertex_attributes[MAX_VERTEX_ATTRIBUTES];
+    /* the layout of the vertex buffer(s) this pipeline draws; debug builds
+       check the vertex shader's inputs against it at creation and fail the
+       pipeline on mismatch */
+    const vertex_layout_t *vertex_layout;
+    u32 vertex_streams; /* 0/1 = one vertex buffer; N = N identical streams
+                           (draw calls supply N meshes, shader locations
+                           continue across streams) */
 
     u32 uniform_binding_count;
     uniform_binding_t uniform_bindings[MAX_UNIFORM_BINDINGS];
@@ -100,7 +109,9 @@ struct _pipeline_config_t
 
 typedef struct
 {
-    u64 __instance_data_address; /* storage buffer device address, filled in by the renderer */
+    u64 _instance_data_address; /* renderer-internal: overwritten with the
+                                   storage buffer's device address at bake —
+                                   never set this manually */
 } sbo_push_constant_t;
 
 #endif

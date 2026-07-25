@@ -24,8 +24,6 @@
 #define MAX_PROPERTY_COUNT          MAX_LAYER_COUNT
 #define MAX_PRESENT_MODES           8
 
-#define MAX_STATIC_BUFFERS          256
-
 /* backend-global vulkan state, see vulkan_context.h */
 VkDevice                         g_device;
 VkPhysicalDevice                 g_physical_device;
@@ -134,7 +132,7 @@ bool VulkanRenderer_Init(arena_t *arena, platform_window_t *window)
 
     if (!VulkanPass_Init(s_renderer->frame_arena))
         goto fail;
-    if (!VulkanBuffer_Init())
+    if (!VulkanBuffer_Init(s_renderer->command_pool, s_renderer->queue_families.graphics_queue))
         goto fail;
     if (!VulkanTexture_Init())
         goto fail;
@@ -332,66 +330,6 @@ void VulkanRenderer_WaitIdle()
 VkExtent2D VulkanRenderer_GetExtent()
 {
     return s_renderer->swapchain.extent;
-}
-
-pipeline_handle_t VulkanRenderer_AddPipeline(renderpass_handle_t pass_handle,
-                                             const pipeline_config_t *config)
-{
-    return VulkanPass_AddPipeline(pass_handle, config);
-}
-
-VkBuffer VulkanRenderer_CreateStaticVertexBuffer(const void *vertices, u64 size)
-{
-    VkBuffer buffer = VulkanBuffer_CreateStatic(
-        s_renderer->command_pool, s_renderer->queue_families.graphics_queue, vertices, size,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-
-    return buffer;
-}
-
-VkBuffer VulkanRenderer_CreateStaticIndexBuffer(const u32 *indices, u32 index_count)
-{
-    VkBuffer buffer = VulkanBuffer_CreateStatic(
-        s_renderer->command_pool, s_renderer->queue_families.graphics_queue, (const u8 *)indices,
-        index_count * sizeof(u32), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-
-    return buffer;
-}
-
-buffer_object_handle_t VulkanRenderer_CreateUniformBuffer(u64 size, uniform_stage_t stage)
-{
-    buffer_object_type_t type =
-        stage == UNIFORM_STAGE_VERTEX ? BO_UNIFORM_VERTEX : BO_UNIFORM_FRAGMENT;
-
-    return VulkanBuffer_CreateObject(s_renderer->global_arena, size, type);
-}
-
-buffer_object_handle_t VulkanRenderer_CreateStorageBuffer(u64 capacity)
-{
-    return VulkanBuffer_CreateObject(s_renderer->global_arena, capacity, BO_STORAGE);
-}
-
-texture_handle_t VulkanRenderer_CreateTexture(u32 width, u32 height, const u8 *rgba_data,
-                                              sampler_handle_t sampler)
-{
-    return VulkanTexture_Create(width, height, rgba_data, sampler);
-}
-
-texture_handle_t VulkanRenderer_CreateRenderTexture(u32 width, u32 height,
-                                                    sampler_handle_t sampler)
-{
-    return VulkanTexture_CreateRenderTarget(width, height, sampler);
-}
-
-sampler_handle_t VulkanRenderer_CreateSampler()
-{
-    return VulkanTexture_CreateSampler();
-}
-
-renderpass_handle_t VulkanRenderer_CreateRenderPass(texture_handle_t target_texture,
-                                                    u32 pass_order)
-{
-    return VulkanPass_CreateImagePass(target_texture, pass_order);
 }
 
 static bool create_swapchain(bool vsync)

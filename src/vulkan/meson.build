@@ -7,3 +7,8 @@ vulkan_sources += files(
     'vulkan_memory.c',
     'vulkan_texture.c',
 )
+
+# backs the DEBUG_BUILD-only pipeline vertex input validation
+if get_option('buildtype').startswith('debug')
+    vulkan_sources += files('vulkan_spirv.c')
+endif

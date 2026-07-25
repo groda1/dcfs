@@ -33,7 +33,6 @@ typedef struct
 
 
 model_instance_handle_t ModelInstance_New(model_handle_t model);
-void ModelInstance_Destroy(model_instance_handle_t model_instance);
 
 bool ModelInstance_SetMaterialBaseColor(model_instance_handle_t instance, string material,
                                         vec3 color);

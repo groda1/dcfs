@@ -11,7 +11,7 @@
 #include "mesh.h"
 #include "mesh_internal.h"
 #include "model_internal.h"
-#include "renderer.h"
+#include "vulkan_buffer.h"
 
 #define MAGIC 0x4C444F4D474F5246 // "FROGMODL" little endian
 extern arena_t *g_engine_arena;
@@ -94,6 +94,21 @@ model_handle_t Frog_LoadModel(const char *path)
     Log(DEBUG, "read frog header from file: %s { magic=%lX version=%u tri=%u mat=%u anchors=%u anims=%u",
         path, header.magic, header.version, header.triangle_count, header.material_count, header.anchor_count, header.animation_count);
 
+    if (header.magic != MAGIC)
+    {
+        Log(ERROR, "not a frog model: %s", path);
+        goto exit;
+    }
+
+    /* the model's mesh data lives in its keyframes, so a model without at
+       least one animation with one keyframe has nothing to draw; the model
+       instance code relies on this */
+    if (header.animation_count == 0)
+    {
+        Log(ERROR, "frog model has no animations: %s", path);
+        goto exit;
+    }
+
     Assert(g_engine_arena != NULL);
     Assert(g_scratch != NULL);
 
@@ -143,7 +158,10 @@ model_handle_t Frog_LoadModel(const char *path)
     u32 *indices = arena_push_array(g_scratch, u32, index_count);
     for (u32 i = 0; i < index_count; i++)
         indices[i] = i;
-    VkBuffer index_buffer = Renderer_CreateStaticIndexBuffer(indices, index_count);
+    /* every keyframe mesh shares this identity index buffer */
+    VkBuffer index_buffer = VulkanBuffer_CreateStaticIndex(indices, index_count);
+    if (index_buffer == VK_NULL_HANDLE)
+        goto fail;
 
     // Animations
     for (u32 anim_idx = 0; anim_idx < model->animation_count; anim_idx++)
@@ -157,6 +175,12 @@ model_handle_t Frog_LoadModel(const char *path)
 
         if (!fread(&animation->keyframe_count, sizeof(u16), 1, file))
             goto fail;
+
+        if (animation->keyframe_count == 0)
+        {
+            Log(ERROR, "animation %S has no keyframes", animation->name);
+            goto fail;
+        }
 
         Log(DEBUG, "read animation header (%S, keyframes=%u)", animation->name, animation->keyframe_count);
 
@@ -197,7 +221,10 @@ model_handle_t Frog_LoadModel(const char *path)
                 //Log(DEBUG, "read triangle keyframe=%u: %v3 %v3 %v3 normal=%v3", key_idx, v0->position, v1->position, v2->position, normal);
             }
 
-            VkBuffer vertex_buffer = Renderer_CreateStaticVertexBuffer(vertex_data, sizeof(normal_material_vertex_t) * header.triangle_count * 3);
+            VkBuffer vertex_buffer = VulkanBuffer_CreateStaticVertex(
+                vertex_data, sizeof(normal_material_vertex_t) * header.triangle_count * 3);
+            if (vertex_buffer == VK_NULL_HANDLE)
+                goto fail;
 
             mesh_t *mesh = arena_push(g_engine_arena, mesh_t);
             mesh->vertex_buffer = vertex_buffer;

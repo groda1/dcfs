@@ -55,7 +55,7 @@ bool Draw_Init()
 {
     s_draw.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_TEXTURED_QUAD);
 
-    s_draw.vp_uniform = Renderer_CreateUniformBuffer(sizeof(view_projection_t), UNIFORM_STAGE_VERTEX);
+    s_draw.vp_uniform = Renderer_CreateUniformBuffer(sizeof(view_projection_t));
     if (s_draw.vp_uniform == BUFFER_OBJECT_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create view projection uniform");
@@ -97,20 +97,7 @@ bool Draw_Init()
         .vertex_shader = Renderer_LoadShader("shaders/2d_ssbo.vert.spv"),
         .fragment_shader = Renderer_LoadShader("shaders/2d_ssbo.frag.spv"),
         .push_constant_size = sizeof(push_constant_t),
-        .vertex_stride = sizeof(textured_vertex_t),
-        .vertex_attribute_count = 2,
-        .vertex_attributes = {
-            {
-                .location = 0,
-                .format = VERTEX_FORMAT_F32X3,
-                .offset = offsetof(textured_vertex_t, position),
-            },
-            {
-                .location = 1,
-                .format = VERTEX_FORMAT_F32X2,
-                .offset = offsetof(textured_vertex_t, texture_coord),
-            },
-        },
+        .vertex_layout = &VERTEX_LAYOUT_TEXTURED,
         .uniform_binding_count = 1,
         .uniform_bindings = {
             {

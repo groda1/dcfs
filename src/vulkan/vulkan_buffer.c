@@ -51,8 +51,10 @@ struct _retired_buffer_t
     u64             frame;
 };
 
-static bool copy_buffer_sync(VkCommandPool command_pool, VkQueue submit_queue, VkBuffer src,
-                             VkBuffer dst, VkDeviceSize size);
+static bool copy_buffer_sync(VkBuffer src, VkBuffer dst, VkDeviceSize size);
+static bool create_staging_buffer(const void *data, u64 size, VkBuffer *buffer_out,
+                                  VkDeviceMemory *memory_out);
+static VkBuffer create_static_buffer(const void *data, u64 size, VkBufferUsageFlags usage);
 static buffer_object_t *get_buffer_object(buffer_object_handle_t handle);
 static bool create_vulkan_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                  VkMemoryPropertyFlags memory_flags, VkBuffer *buffer_out,
@@ -65,6 +67,10 @@ static void flush_retired_buffers(bool destroy_all);
 typedef struct _buffers_t buffers_t;
 struct _buffers_t
 {
+    /* for the synchronous static buffer uploads */
+    VkCommandPool   command_pool;
+    VkQueue         submit_queue;
+
     buffer_object_t *buffer_objects[MAX_BUFFER_OBJECT];
     u32             buffer_object_count;
 
@@ -88,8 +94,11 @@ static buffer_object_t *get_buffer_object(buffer_object_handle_t handle)
     return s_buffers.buffer_objects[handle - 1];
 }
 
-bool VulkanBuffer_Init()
+bool VulkanBuffer_Init(VkCommandPool command_pool, VkQueue submit_queue)
 {
+    s_buffers.command_pool = command_pool;
+    s_buffers.submit_queue = submit_queue;
+
     return true;
 }
 
@@ -121,10 +130,19 @@ void VulkanBuffer_Destroy()
 }
 
 
-VkBuffer VulkanBuffer_CreateStatic(VkCommandPool command_pool, VkQueue submit_queue,
-                                   const u8 *data, u64 size, VkBufferUsageFlags usage)
+VkBuffer VulkanBuffer_CreateStaticVertex(const void *vertices, u64 size)
 {
+    return create_static_buffer(vertices, size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+}
 
+VkBuffer VulkanBuffer_CreateStaticIndex(const u32 *indices, u32 index_count)
+{
+    return create_static_buffer(indices, index_count * sizeof(u32),
+                                VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
+static VkBuffer create_static_buffer(const void *data, u64 size, VkBufferUsageFlags usage)
+{
     VkBuffer static_buffer = VK_NULL_HANDLE;
 
     if (s_buffers.static_buffer_count >= MAX_STATIC_BUFFERS)
@@ -135,7 +153,7 @@ VkBuffer VulkanBuffer_CreateStatic(VkCommandPool command_pool, VkQueue submit_qu
 
     VkBuffer staging_buffer;
     VkDeviceMemory staging_memory;
-    if (!VulkanBuffer_CreateStaging(data, size, &staging_buffer, &staging_memory))
+    if (!create_staging_buffer(data, size, &staging_buffer, &staging_memory))
         return VK_NULL_HANDLE;
 
     VkBuffer buffer;
@@ -145,19 +163,16 @@ VkBuffer VulkanBuffer_CreateStatic(VkCommandPool command_pool, VkQueue submit_qu
                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &buffer, &memory))
         goto exit;
 
-    if (!copy_buffer_sync(command_pool, submit_queue, staging_buffer, buffer, size))
+    if (!copy_buffer_sync(staging_buffer, buffer, size))
     {
         vkDestroyBuffer(g_device, buffer, NULL);
         vkFreeMemory(g_device, memory, NULL);
         goto exit;
     }
 
-    if (buffer != VK_NULL_HANDLE)
-    {
-        s_buffers.static_buffers[s_buffers.static_buffer_count] = buffer;
-        s_buffers.static_buffer_memories[s_buffers.static_buffer_count] = memory;
-        s_buffers.static_buffer_count++;
-    }
+    s_buffers.static_buffers[s_buffers.static_buffer_count] = buffer;
+    s_buffers.static_buffer_memories[s_buffers.static_buffer_count] = memory;
+    s_buffers.static_buffer_count++;
 
     static_buffer = buffer;
 
@@ -169,8 +184,10 @@ exit:
     return static_buffer;
 }
 
-bool VulkanBuffer_CreateStaging(const void *data, u64 size, VkBuffer *buffer_out,
-                                VkDeviceMemory *memory_out)
+/* host-visible transfer source prefilled with data; the caller owns the
+   buffer and memory */
+static bool create_staging_buffer(const void *data, u64 size, VkBuffer *buffer_out,
+                                  VkDeviceMemory *memory_out)
 {
     VkBuffer buffer;
     VkDeviceMemory memory;
@@ -557,13 +574,12 @@ static bool create_vulkan_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
     return true;
 }
 
-/* synchronous copy on the graphics queue */
-static bool copy_buffer_sync(VkCommandPool command_pool, VkQueue submit_queue, VkBuffer src,
-                             VkBuffer dst, VkDeviceSize size)
+/* synchronous copy on the init-time submit queue */
+static bool copy_buffer_sync(VkBuffer src, VkBuffer dst, VkDeviceSize size)
 {
     VkCommandBufferAllocateInfo allocate_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = command_pool,
+        .commandPool = s_buffers.command_pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
@@ -597,15 +613,15 @@ static bool copy_buffer_sync(VkCommandPool command_pool, VkQueue submit_queue, V
         vkCmdCopyBuffer(command_buffer, src, dst, 1, &region);
 
         result = vkEndCommandBuffer(command_buffer) == VK_SUCCESS
-            && vkQueueSubmit(submit_queue, 1, &submit_info,
+            && vkQueueSubmit(s_buffers.submit_queue, 1, &submit_info,
                              VK_NULL_HANDLE) == VK_SUCCESS
-            && vkQueueWaitIdle(submit_queue) == VK_SUCCESS;
+            && vkQueueWaitIdle(s_buffers.submit_queue) == VK_SUCCESS;
     }
 
     if (!result)
         Log(ERROR, "failed to record and submit buffer copy");
 
-    vkFreeCommandBuffers(g_device, command_pool, 1, &command_buffer);
+    vkFreeCommandBuffers(g_device, s_buffers.command_pool, 1, &command_buffer);
 
     return result;
 }

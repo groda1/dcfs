@@ -12,11 +12,10 @@ typedef struct _pipeline_t pipeline_t;
 
 struct _pipeline_t
 {
-    pipeline_config_t   config;
-
     VkPipeline          vk_pipeline;
     VkPipelineLayout    layout;
     u32                 push_constant_size;
+    u32                 vertex_binding_count; /* draws must supply this many meshes */
 
     VkDescriptorSetLayout   descriptor_set_layout;
     VkDescriptorPool        descriptor_pool;

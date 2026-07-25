@@ -10,7 +10,6 @@
 #include "render_types.h"
 #include "renderer.h"
 #include "draw.h"
-#include "vulkan_renderer.h"
 #include "console.h"
 
 #define MAX_FRAMETIME_SAMPLES   512
@@ -54,11 +53,8 @@ bool Engine_Init(platform_window_t *window)
     g_scratch = MemoryArena_Create("global-scratch");
     s_engine.last_time_ns = OS_TimeNowNs();
 
-    if (!VulkanRenderer_Init(g_engine_arena, window))
+    if (!Renderer_Init(window))
         goto fail;
-
-    if (!Renderer_Init())
-        goto fail_renderer;
 
     if (!MeshManager_Init())
         goto fail_renderer;
@@ -72,7 +68,7 @@ bool Engine_Init(platform_window_t *window)
     return true;
 
 fail_renderer:
-    VulkanRenderer_Destroy();
+    Renderer_Destroy();
 fail:
     MemoryArena_Destroy(g_scratch);
     g_scratch = NULL;
@@ -83,8 +79,9 @@ fail:
 
 void Engine_Destroy(void)
 {
+    Console_Destroy();
     Draw_Destroy();
-    VulkanRenderer_Destroy();
+    Renderer_Destroy();
 
     MemoryArena_Print(g_scratch);
     MemoryArena_Destroy(g_scratch);
@@ -99,7 +96,7 @@ void Engine_HandleResize(u32 width, u32 height)
 {
     Log(DEBUG, "window resized to %ux%u", width, height);
 
-    VulkanRenderer_HandleResize(width, height);
+    Renderer_HandleResize(width, height);
 
     Draw_HandleResize(width, height);
 }

@@ -7,16 +7,14 @@
 #include "memory_arena.h"
 #include "render_types.h"
 
-bool VulkanBuffer_Init();
+/* the pool/queue pair is used for the synchronous static buffer uploads */
+bool VulkanBuffer_Init(VkCommandPool command_pool, VkQueue submit_queue);
 void VulkanBuffer_Destroy();
 
-VkBuffer VulkanBuffer_CreateStatic(VkCommandPool command_pool, VkQueue submit_queue,
-                                   const u8 *data, u64 size, VkBufferUsageFlags usage);
-
-/* host-visible transfer source prefilled with data; the caller owns the
-   buffer and memory */
-bool VulkanBuffer_CreateStaging(const void *data, u64 size, VkBuffer *buffer_out,
-                                VkDeviceMemory *memory_out);
+/* device-local mesh data, uploaded synchronously during the call; owned by
+   the buffer registry, destroyed with it */
+VkBuffer VulkanBuffer_CreateStaticVertex(const void *vertices, u64 size);
+VkBuffer VulkanBuffer_CreateStaticIndex(const u32 *indices, u32 index_count);
 
 buffer_object_handle_t VulkanBuffer_CreateObject(arena_t *arena, u64 capacity,
                                                  buffer_object_type_t type);

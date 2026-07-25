@@ -469,6 +469,30 @@ Exporter / loader contract:
                   orientation  f32[4]   16   quat, xyzw
 
 
+ENGINE: vertex input conventions (2026-07-25 cleanup)
+-----------------------------------------------------
+
+Vertex layouts are declared ONCE by the engine, next to the vertex
+structs in mesh.h (VERTEX_LAYOUT_NORMAL, VERTEX_LAYOUT_NORMAL_MATERIAL,
+...). A pipeline config points at a layout instead of hand-writing
+stride/attribute tables — game code never spells out offsets.
+
+  - Shader input locations are implicit: attribute i of the layout is
+    location i, in declaration order starting at 0.
+  - Multi-stream pipelines (keyframe morph) set vertex_streams = N;
+    the layout is replicated per stream and locations continue
+    sequentially (stream 1 of a 3-attribute layout is locations 3..5).
+    Draw calls supply one mesh per stream, all sharing one topology.
+  - Pipeline creation reflects the vertex shader's SPIR-V and HARD
+    FAILS on any mismatch (missing attribute, wrong format), with the
+    pipeline name and location in the log. A config mistake can no
+    longer render silently wrong; an attribute the shader ignores is
+    only a warning. Debug builds only (like the validation layers) —
+    release builds don't even compile the reflector.
+  - A draw call whose mesh count differs from the pipeline's declared
+    stream count is rejected with an error at submission.
+
+
 MILESTONE 2 (agreed): one room, walking cube
 --------------------------------------------
 

@@ -11,6 +11,8 @@
 
 typedef struct _vk_renderer_t vk_renderer_t;
 
+/* device and frame lifecycle only; resources go through the subsystem
+   modules directly (vulkan_pass, vulkan_buffer, vulkan_texture) */
 
 bool VulkanRenderer_Init(arena_t *arena, platform_window_t *window);
 bool VulkanRenderer_Destroy();
@@ -22,23 +24,5 @@ bool VulkanRenderer_EndFrame();
 void VulkanRenderer_WaitIdle();
 
 VkExtent2D VulkanRenderer_GetExtent();
-
-pipeline_handle_t VulkanRenderer_AddPipeline(renderpass_handle_t pass_handle,
-                                             const pipeline_config_t *config);
-
-VkBuffer VulkanRenderer_CreateStaticVertexBuffer(const void *vertices, u64 size);
-VkBuffer VulkanRenderer_CreateStaticIndexBuffer(const u32 *indices, u32 index_count);
-
-buffer_object_handle_t VulkanRenderer_CreateUniformBuffer(u64 size, uniform_stage_t stage);
-buffer_object_handle_t VulkanRenderer_CreateStorageBuffer(u64 capacity);
-
-texture_handle_t VulkanRenderer_CreateTexture(u32 width, u32 height, const u8 *rgba_data,
-                                              sampler_handle_t sampler);
-texture_handle_t VulkanRenderer_CreateRenderTexture(u32 width, u32 height,
-                                                    sampler_handle_t sampler);
-sampler_handle_t VulkanRenderer_CreateSampler();
-
-renderpass_handle_t VulkanRenderer_CreateRenderPass(texture_handle_t target_texture,
-                                                    u32 pass_order);
 
 #endif

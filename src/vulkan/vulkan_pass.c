@@ -324,10 +324,21 @@ void VulkanPass_AddDrawCommand(const draw_command_t *draw_command)
         return;
     }
 
+    const pipeline_t *pipeline = get_pipeline(pass, draw_command->pipeline);
+
+#ifdef DEBUG_BUILD
+    if (draw_command->vertex_buffer_count != pipeline->vertex_binding_count)
+    {
+        Log(ERROR, "draw command supplies %u vertex streams but the pipeline declares %u; "
+            "skipping draw", draw_command->vertex_buffer_count,
+            pipeline->vertex_binding_count);
+        return;
+    }
+#endif
+
     draw_command_t *copy = arena_push(s_passes.frame_arena, draw_command_t);
     *copy = *draw_command;
 
-    const pipeline_t *pipeline = get_pipeline(pass, draw_command->pipeline);
     if (pipeline->push_constant_size > 0 && draw_command->push_constant_data)
     {
         u8 *push_constant_copy = arena_push_array_no_zero(s_passes.frame_arena, u8,

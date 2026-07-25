@@ -131,8 +131,8 @@ void ModelInstance_Draw(model_instance_handle_t instance, renderpass_handle_t pa
         instance->anim_from_mesh, instance->anim_to_mesh
     };
 
-    Renderer_DrawMultiMesh(pass_handle, pipeline, &push_constant,
-                               instance->palette_sbo, meshes, ArrayCount(meshes));
+    Renderer_DrawMeshes(pass_handle, pipeline, &push_constant, instance->palette_sbo, 1,
+                        meshes, ArrayCount(meshes));
 }
 
 model_animation_handle_t Model_GetAnimation(model_handle_t model, const char *animation_name)
