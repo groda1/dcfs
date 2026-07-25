@@ -30,12 +30,10 @@ struct _draw_command_t
 
     const void *push_constant_data;
 
-    /* optional storage buffer (BUFFER_OBJECT_HANDLE_INVALID = none); its
-       per-frame device address is written into the first 8 bytes of the
-       push constant at bake time */
     buffer_object_handle_t storage_buffer;
 
-    VkBuffer vertex_buffer;
+    VkBuffer vertex_buffers[MAX_VERTEX_BINDINGS];
+    u32      vertex_buffer_count;
     VkBuffer index_buffer;
     u32      index_count;
     u32      instance_count;

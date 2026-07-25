@@ -16,6 +16,7 @@
 #define SAMPLER_HANDLE_INVALID  0
 
 #define MAX_VERTEX_ATTRIBUTES 8
+#define MAX_VERTEX_BINDINGS   3
 #define MAX_UNIFORM_BINDINGS  4
 
 typedef u32 renderpass_handle_t;
@@ -42,6 +43,9 @@ typedef enum
 typedef struct
 {
     u32             location;
+    u32             binding; /* which vertex buffer feeds this attribute, in
+                                the order the draw call passes them; all
+                                bindings share vertex_stride */
     vertex_format_t format;
     u32             offset;
 } vertex_attribute_t;

@@ -21,7 +21,6 @@
 #define TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
 
 #define PLAYER_SIZE             0.7f
-#define PLAYER_COLOR            V4(0.9f, 0.5f, 0.2f, 1.0f)
 #define PLAYER_MOVE_SPEED       7.0f;
 #define PLAYER_BUMP_SPEED       5.0f
 #define PLAYER_BUMP_DISTANCE    0.3f
@@ -60,12 +59,6 @@ typedef struct
 } tile_instance_t;
 StaticAssert(sizeof(tile_instance_t) == 80, "quad_instance_t must match the shader's std430 stride");
 
-typedef struct
-{
-    mat4 transform;
-    vec4 color;
-} player_push_constant_t;
-
 typedef enum
 {
     PLAYER_ANIM_NONE,
@@ -94,8 +87,9 @@ typedef struct
 
     mesh_handle_t cube_mesh;
     mesh_handle_t quad_mesh;
-    mesh_handle_t player_mesh;
     model_handle_t player_model;
+    model_instance_handle_t player_model_instance;
+    model_animation_handle_t player_wave_anim;
 
     pipeline_handle_t tile_pipeline;
     buffer_object_handle_t tile_sbo;
@@ -204,22 +198,45 @@ bool Game_Init(platform_window_t *window)
         .name = "player",
         .vertex_shader = Renderer_LoadShader("shaders/frog_player.vert.spv"),
         .fragment_shader = Renderer_LoadShader("shaders/frog_player.frag.spv"),
-        .push_constant_size = sizeof(player_push_constant_t),
+        .push_constant_size = sizeof(model_push_constant_t),
         .vertex_stride = sizeof(normal_material_vertex_t),
-        .vertex_attribute_count = 2,
+        .vertex_attribute_count = 6,
         .vertex_attributes = {
+            /* binding 0 = current keyframe mesh, binding 1 = next keyframe
+               mesh; the shader mixes them by keyframe_t */
             {
                 .location = 0,
+                .binding = 0,
                 .format = VERTEX_FORMAT_F32X3,
                 .offset = offsetof(normal_material_vertex_t, position),
             },
             {
                 .location = 1,
+                .binding = 0,
                 .format = VERTEX_FORMAT_F32X3,
                 .offset = offsetof(normal_material_vertex_t, normal),
             },
             {
                 .location = 2,
+                .binding = 0,
+                .format = VERTEX_FORMAT_U32,
+                .offset = offsetof(normal_material_vertex_t, material),
+            },
+            {
+                .location = 3,
+                .binding = 1,
+                .format = VERTEX_FORMAT_F32X3,
+                .offset = offsetof(normal_material_vertex_t, position),
+            },
+            {
+                .location = 4,
+                .binding = 1,
+                .format = VERTEX_FORMAT_F32X3,
+                .offset = offsetof(normal_material_vertex_t, normal),
+            },
+            {
+                .location = 5,
+                .binding = 1,
                 .format = VERTEX_FORMAT_U32,
                 .offset = offsetof(normal_material_vertex_t, material),
             },
@@ -242,8 +259,29 @@ bool Game_Init(platform_window_t *window)
         return false;
     }
 
-    g_game.player_mesh = MeshManager_LoadMesh(string_lit("resources/models/suzanne.obj"));
     g_game.player_model = Frog_LoadModel("resources/models/human.frog");
+    if (g_game.player_model == MODEL_INVALID_HANDLE)
+    {
+        Log(ERROR, "failed to load player model");
+        Engine_Destroy();
+        return false;
+    }
+
+    g_game.player_model_instance = ModelInstance_New(g_game.player_model);
+    if (g_game.player_model_instance == MODEL_INSTANCE_INVALID_HANDLE)
+    {
+        Log(ERROR, "failed to create player model instance");
+        Engine_Destroy();
+        return false;
+    }
+
+    g_game.player_wave_anim = Model_GetAnimation(g_game.player_model, "wave");
+    if (g_game.player_wave_anim == MODEL_ANIMATION_INVALID_HANDLE)
+    {
+        Log(ERROR, "failed load player animation");
+        Engine_Destroy();
+        return false;
+    }
 
     g_game.player_pos_x = GRID_WIDTH / 2;
     g_game.player_pos_y = GRID_HEIGHT / 2;
@@ -288,6 +326,11 @@ void Game_HandleKeyDown(key_code_t key)
         camera_set_mode(game->camera_mode == CAMERA_MODE_OVERVIEW
                             ? CAMERA_MODE_DEFAULT
                             : CAMERA_MODE_OVERVIEW);
+        return;
+    }
+    if (key == KEY_L)
+    {
+        ModelInstance_PlayAnimation(game->player_model_instance, game->player_wave_anim);
         return;
     }
 
@@ -375,6 +418,8 @@ void Game_Tick(void)
 
 static void update_player(f32 delta_time)
 {
+    ModelInstance_Update(g_game.player_model_instance, delta_time);
+
     switch (g_game.player_anim)
     {
         case PLAYER_ANIM_MOVE:
@@ -593,19 +638,16 @@ static void draw_grid(void)
 
 static void draw_player(void)
 {
-    player_push_constant_t push_constant = {
-        .transform = HMM_MulM4(
+    mat4 transform = HMM_MulM4(
                         HMM_Translate( g_game.player_gfx_pos),
                         HMM_MulM4(
                             HMM_Rotate_RH(HMM_AngleDeg(g_game.player_gfx_rot), V3(0.0f, 1.0f, 0.0f)),
                             HMM_Scale(V3(PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE))
                         )
-                    ),
-        .color = PLAYER_COLOR,
-    };
+                    );
 
-    Renderer_DrawModel(SWAPCHAIN_PASS_HANDLE, g_game.player_pipeline,
-                      &push_constant, g_game.player_model);
+    ModelInstance_Draw(g_game.player_model_instance, SWAPCHAIN_PASS_HANDLE,
+                       g_game.player_pipeline, transform);
 }
 
 

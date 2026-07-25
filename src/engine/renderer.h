@@ -4,7 +4,6 @@
 #include <vulkan/vulkan_core.h> // TODO refactor out
 
 #include "mesh.h"
-#include "model.h"
 #include "render_types.h"
 
 typedef struct
@@ -56,22 +55,19 @@ bool Renderer_SetBufferObject(buffer_object_handle_t handle, const void *data, u
 bool Renderer_ClearBufferObject(buffer_object_handle_t handle);
 bool Renderer_PushBufferObject(buffer_object_handle_t handle, const void *data, u64 size);
 
-/* push constant data is copied; the pointer only needs to stay valid for the
-   duration of the call */
 void Renderer_DrawMesh(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
                        const void *push_constant_data, mesh_handle_t mesh);
 
-/* draws instance_count instances; if instance_buffer is a valid storage
-   buffer handle, the renderer writes its device address into the first 8
-   bytes of the push constant, so the push constant struct must start with a
-   u64 placeholder */
 void Renderer_DrawMeshInstanced(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
                                 const void *push_constant_data,
                                 buffer_object_handle_t instance_buffer, u32 instance_count,
                                 mesh_handle_t mesh);
 
-void Renderer_DrawModel(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
-                       const void *push_constant_data, model_handle_t model);
+void Renderer_DrawMultiMesh(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
+                                const void *push_constant_data,
+                                buffer_object_handle_t instance_buffer,
+                                mesh_handle_t *meshes, u32 mesh_count);
+
 
 void Renderer_BeginFrame();
 bool Renderer_EndFrame();

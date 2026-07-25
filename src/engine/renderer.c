@@ -13,6 +13,7 @@
 #include "vulkan_pass.h"
 #include "vulkan_renderer.h"
 #include "vulkan_buffer.h"
+#include "vulkan_types.h"
 
 #define MAX_RESOURCE_PATH 512
 
@@ -134,7 +135,8 @@ void Renderer_DrawMeshInstanced(renderpass_handle_t pass_handle, pipeline_handle
         .pipeline = pipeline,
         .push_constant_data = push_constant_data,
         .storage_buffer = instance_buffer,
-        .vertex_buffer = mesh->vertex_buffer,
+        .vertex_buffers = {mesh->vertex_buffer},
+        .vertex_buffer_count = 1,
         .index_buffer = mesh->index_buffer,
         .index_count = mesh->index_count,
         .instance_count = instance_count,
@@ -146,14 +148,34 @@ void Renderer_DrawMeshInstanced(renderpass_handle_t pass_handle, pipeline_handle
     VulkanPass_AddDrawCommand(&draw_command);
 }
 
-void Renderer_DrawModel(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
-                       const void *push_constant_data, model_handle_t model)
-{
-    Assert(model != MODEL_INVALID_HANDLE);
 
-    mesh_handle_t mesh = model->animations[0].keyframes[0].mesh;
-    Renderer_DrawMeshInstanced(pass_handle, pipeline, push_constant_data,
-                               BUFFER_OBJECT_HANDLE_INVALID, 1, mesh);
+void Renderer_DrawMultiMesh(renderpass_handle_t pass_handle, pipeline_handle_t pipeline,
+                                const void *push_constant_data,
+                                buffer_object_handle_t instance_buffer,
+                                mesh_handle_t *meshes, u32 mesh_count)
+{
+    Assert(mesh_count >= 1 && mesh_count <= MAX_VERTEX_BINDINGS);
+
+    draw_command_t draw_command = {
+        .pass = pass_handle,
+        .pipeline = pipeline,
+        .push_constant_data = push_constant_data,
+        .storage_buffer = instance_buffer,
+        .vertex_buffer_count = mesh_count,
+        .index_buffer = meshes[0]->index_buffer,
+        .index_count = meshes[0]->index_count,
+        .instance_count = 1,
+    };
+
+    for (u32 i = 0; i < mesh_count; i++)
+    {
+        draw_command.vertex_buffers[i] = meshes[i]->vertex_buffer;
+    }
+
+    g_render_stats.n_draw_calls++;
+    g_render_stats.n_triangles +=  meshes[0]->index_count / 3;
+
+    VulkanPass_AddDrawCommand(&draw_command);
 }
 
 

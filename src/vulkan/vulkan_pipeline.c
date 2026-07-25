@@ -48,27 +48,39 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
         },
     };
 
-    VkVertexInputBindingDescription vertex_binding = {
-        .binding = 0,
-        .stride = config->vertex_stride,
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-
+    /* the binding count is derived from the attributes so it cannot drift
+       out of sync with them; every draw through the pipeline must bind that
+       many vertex buffers */
+    u32 vertex_binding_count = 1;
     VkVertexInputAttributeDescription vertex_attributes[MAX_VERTEX_ATTRIBUTES];
     for (u32 i = 0; i < config->vertex_attribute_count; i++)
     {
+        Assert(config->vertex_attributes[i].binding < MAX_VERTEX_BINDINGS);
+        vertex_binding_count = Max(vertex_binding_count,
+                                   config->vertex_attributes[i].binding + 1);
+
         vertex_attributes[i] = (VkVertexInputAttributeDescription){
             .location = config->vertex_attributes[i].location,
-            .binding = 0,
+            .binding = config->vertex_attributes[i].binding,
             .format = vertex_format_to_vk(config->vertex_attributes[i].format),
             .offset = config->vertex_attributes[i].offset,
         };
     }
 
+    VkVertexInputBindingDescription vertex_bindings[MAX_VERTEX_BINDINGS];
+    for (u32 i = 0; i < vertex_binding_count; i++)
+    {
+        vertex_bindings[i] = (VkVertexInputBindingDescription){
+            .binding = i,
+            .stride = config->vertex_stride,
+            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        };
+    }
+
     VkPipelineVertexInputStateCreateInfo vertex_input_state = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &vertex_binding,
+        .vertexBindingDescriptionCount = vertex_binding_count,
+        .pVertexBindingDescriptions = vertex_bindings,
         .vertexAttributeDescriptionCount = config->vertex_attribute_count,
         .pVertexAttributeDescriptions = vertex_attributes,
     };

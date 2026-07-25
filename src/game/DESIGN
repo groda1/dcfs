@@ -391,7 +391,11 @@ bob is keyframes on the head object). Consequences:
   - Palette colors are read from each material's Principled BSDF
     Base Color (viewport diffuse color as fallback) and the viewport
     display specular color; faces with no material get a synthesized
-    "default" slot.
+    "default" slot. When the Base Color socket is DRIVEN by a link,
+    its default_value is dead — rendering ignores it — so the exporter
+    follows the link instead: an RGB node exports its value, and any
+    other driver (texture, attribute, ...) fails the export, because
+    the palette can only hold a flat color.
 
 Conventions: little-endian; fields packed, no padding; a string is a
 u16 byte length followed by that many UTF-8 bytes, no null terminator;

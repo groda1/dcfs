@@ -554,8 +554,8 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
                                sizeof(address), &address);
         }
 
-        VkDeviceSize vertex_buffer_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &command->vertex_buffer, &vertex_buffer_offset);
+        VkDeviceSize vertex_buffer_offsets[MAX_VERTEX_BINDINGS] = {0};
+        vkCmdBindVertexBuffers(command_buffer, 0, command->vertex_buffer_count, command->vertex_buffers, vertex_buffer_offsets);
         vkCmdBindIndexBuffer(command_buffer, command->index_buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(command_buffer, command->index_count, command->instance_count, 0, 0, 0);
     }

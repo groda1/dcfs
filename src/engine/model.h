@@ -6,8 +6,11 @@
 #include "core_string.h"
 
 #include "mesh.h"
+#include "render_types.h"
 
 #define MODEL_INVALID_HANDLE NULL
+#define MODEL_INSTANCE_INVALID_HANDLE NULL
+#define MODEL_ANIMATION_INVALID_HANDLE NULL
 
 typedef struct _model_t             model_t;
 typedef struct _model_material_t    model_material_t;
@@ -17,45 +20,35 @@ typedef struct _model_animation_t   model_animation_t;
 
 typedef const model_t *model_handle_t;
 
-#
+typedef struct _model_instance_t model_instance_t;
+typedef model_instance_t *model_instance_handle_t;
+typedef model_animation_t *model_animation_handle_t;
 
-struct _model_material_t
+typedef struct
 {
-    string name;
-    vec3 base_color;
-    vec3 specular_color;
-};
+    sbo_push_constant_t palette;
+    mat4 transform;
+    f32 keyframe_t;
+} model_push_constant_t;
 
-struct _model_anchor_t
-{
-    vec3 pos;
-    quat orientation;
-};
 
-struct _model_keyframe_t {
-    f32 time_s;
-    mesh_handle_t mesh;
-    model_anchor_t *anchors;
-};
+model_instance_handle_t ModelInstance_New(model_handle_t model);
+void ModelInstance_Destroy(model_instance_handle_t model_instance);
 
-struct _model_animation_t
-{
-    string name;
-    u16 keyframe_count;
+bool ModelInstance_SetMaterialBaseColor(model_instance_handle_t instance, string material,
+                                        vec3 color);
+bool ModelInstance_SetMaterialSpecularColor(model_instance_handle_t instance, string material,
+                                            vec3 color);
 
-    model_keyframe_t *keyframes;
-};
+void ModelInstance_Draw(model_instance_handle_t instance, renderpass_handle_t pass_handle,
+                        pipeline_handle_t pipeline, mat4 transform);
 
-struct _model_t
-{
-    u16 material_count;
-    u16 anchor_count;
-    u16 animation_count;
 
-    model_material_t *materials;
-    string *anchor_names;
-    model_animation_t *animations;
-};
 
+bool ModelInstance_PlayAnimation(model_instance_handle_t instance, model_animation_handle_t animation);
+
+void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time);
+
+model_animation_handle_t Model_GetAnimation(model_handle_t model, const char *animation_name);
 
 #endif

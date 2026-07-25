@@ -287,8 +287,21 @@ def material_colors(mat):
                 principled = node
                 break
     if principled:
-        base = tuple(principled.inputs["Base Color"].default_value[:3])
-        base_src = "Principled Base Color"
+        socket = principled.inputs["Base Color"]
+        if socket.is_linked:
+            # rendering ignores default_value the moment a link drives the
+            # socket, so reading it would silently export the wrong color
+            src_node = socket.links[0].from_node
+            if src_node.type != "RGB":
+                raise ExportError(
+                    f'material "{mat.name}": Base Color is driven by a {src_node.type} '
+                    "node; the palette needs a flat color (an RGB node or an unlinked "
+                    "Base Color)")
+            base = tuple(socket.links[0].from_socket.default_value[:3])
+            base_src = f'RGB node "{src_node.name}"'
+        else:
+            base = tuple(socket.default_value[:3])
+            base_src = "Principled Base Color"
     spec = getattr(mat, "specular_color", None)
     if spec is not None:
         spec, spec_src = tuple(spec[:3]), "viewport specular"

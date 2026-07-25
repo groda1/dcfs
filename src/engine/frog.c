@@ -10,7 +10,7 @@
 
 #include "mesh.h"
 #include "mesh_internal.h"
-#include "model.h"
+#include "model_internal.h"
 #include "renderer.h"
 
 #define MAGIC 0x4C444F4D474F5246 // "FROGMODL" little endian
@@ -194,7 +194,7 @@ model_handle_t Frog_LoadModel(const char *path)
                 v0->material = triangle_materials[tri_idx];
                 v1->material = triangle_materials[tri_idx];
                 v2->material = triangle_materials[tri_idx];
-                Log(DEBUG, "read triangle keyframe=%u: %v3 %v3 %v3 normal=%v3", key_idx, v0->position, v1->position, v2->position, normal);
+                //Log(DEBUG, "read triangle keyframe=%u: %v3 %v3 %v3 normal=%v3", key_idx, v0->position, v1->position, v2->position, normal);
             }
 
             VkBuffer vertex_buffer = Renderer_CreateStaticVertexBuffer(vertex_data, sizeof(normal_material_vertex_t) * header.triangle_count * 3);
