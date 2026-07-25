@@ -138,7 +138,7 @@ bool VulkanRenderer_Init(arena_t *arena, platform_window_t *window)
         goto fail;
     if (!VulkanTexture_Init())
         goto fail;
-    if (!VulkanPass_CreateSwapchainPass(s_renderer->global_arena, &s_renderer->swapchain))
+    if (!VulkanPass_CreateSwapchainPass(&s_renderer->swapchain))
         goto fail;
 
 
@@ -391,7 +391,7 @@ sampler_handle_t VulkanRenderer_CreateSampler()
 renderpass_handle_t VulkanRenderer_CreateRenderPass(texture_handle_t target_texture,
                                                     u32 pass_order)
 {
-    return VulkanPass_CreateImagePass(s_renderer->global_arena, target_texture, pass_order);
+    return VulkanPass_CreateImagePass(target_texture, pass_order);
 }
 
 static bool create_swapchain(bool vsync)

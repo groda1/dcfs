@@ -25,6 +25,8 @@ struct _swapchain_t
 
 struct _draw_command_t
 {
+    draw_command_t *next;
+
     renderpass_handle_t pass;
     pipeline_handle_t   pipeline;
 
@@ -37,7 +39,6 @@ struct _draw_command_t
     VkBuffer index_buffer;
     u32      index_count;
     u32      instance_count;
-
 };
 
 #endif

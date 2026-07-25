@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "log.h"
+#include "memory_arena.h"
 #include "render_types.h"
 #include "vulkan_buffer.h"
 #include "vulkan_context.h"
@@ -13,7 +14,6 @@
 
 
 #define MAX_PIPELINES_PER_PASS 64 // TODO: this need be dynamic
-#define MAX_DRAW_COMMANDS_PER_PASS 1024
 #define MAX_IMAGE_PASSES 16
 
 
@@ -71,9 +71,8 @@ struct _render_pass
     pipeline_t      pipelines[MAX_PIPELINES_PER_PASS];
     u64             pipeline_count;
 
-    draw_command_t  *draw_commands;
-    u32             draw_command_capacity;
-    u32             draw_command_count;
+    draw_command_t  *draw_commands_head; // SLL
+    draw_command_t  *draw_commands_tail;
 
     bool            active;
 };
@@ -133,7 +132,7 @@ bool VulkanPass_Destroy()
     return true;
 }
 
-bool VulkanPass_CreateSwapchainPass(arena_t *arena, swapchain_t *swapchain)
+bool VulkanPass_CreateSwapchainPass(swapchain_t *swapchain)
 {
     Assert(!s_passes.swapchain_set && !s_passes.swapchain_pass.active);
 
@@ -143,9 +142,6 @@ bool VulkanPass_CreateSwapchainPass(arena_t *arena, swapchain_t *swapchain)
 
     if (!create_swapchain_target(swapchain, &pass->target.swapchain_target))
         return false;
-
-    pass->draw_commands = arena_push_array(arena, draw_command_t, MAX_DRAW_COMMANDS_PER_PASS);
-    pass->draw_command_capacity = MAX_DRAW_COMMANDS_PER_PASS;
 
     pass->handle = SWAPCHAIN_PASS_HANDLE;
     pass->color_format = swapchain->format;
@@ -159,7 +155,7 @@ bool VulkanPass_CreateSwapchainPass(arena_t *arena, swapchain_t *swapchain)
     return true;
 }
 
-renderpass_handle_t VulkanPass_CreateImagePass(arena_t *arena, texture_handle_t target_texture,
+renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
                                                u32 order)
 {
     if (s_passes.image_pass_count >= MAX_IMAGE_PASSES)
@@ -184,9 +180,6 @@ renderpass_handle_t VulkanPass_CreateImagePass(arena_t *arena, texture_handle_t 
         Log(ERROR, "failed to create depth resources for image pass");
         return RENDERPASS_HANDLE_INVALID;
     }
-
-    pass->draw_commands = arena_push_array(arena, draw_command_t, MAX_DRAW_COMMANDS_PER_PASS);
-    pass->draw_command_capacity = MAX_DRAW_COMMANDS_PER_PASS;
 
     pass->handle = (renderpass_handle_t)(s_passes.image_pass_count + 1); /* 1-based */
     pass->order = order;
@@ -309,10 +302,15 @@ static render_pass_t *get_render_pass(renderpass_handle_t pass_handle)
 void VulkanPass_BeginFrame()
 {
     if (s_passes.swapchain_set && s_passes.swapchain_pass.active)
-        s_passes.swapchain_pass.draw_command_count = 0;
-
+    {
+        s_passes.swapchain_pass.draw_commands_head = NULL;
+        s_passes.swapchain_pass.draw_commands_tail = NULL;
+    }
     for (u32 i = 0; i < s_passes.image_pass_count; i++)
-        s_passes.image_passes[i].draw_command_count = 0;
+    {
+        s_passes.image_passes[i].draw_commands_head = NULL;
+        s_passes.image_passes[i].draw_commands_tail = NULL;
+    }
 }
 
 void VulkanPass_AddDrawCommand(const draw_command_t *draw_command)
@@ -326,14 +324,8 @@ void VulkanPass_AddDrawCommand(const draw_command_t *draw_command)
         return;
     }
 
-    if (pass->draw_command_count >= pass->draw_command_capacity)
-    {
-        Log(WARNING, "render pass draw command limit reached; command dropped");
-        return;
-    }
-
-    draw_command_t *slot = &pass->draw_commands[pass->draw_command_count++];
-    *slot = *draw_command;
+    draw_command_t *copy = arena_push(s_passes.frame_arena, draw_command_t);
+    *copy = *draw_command;
 
     const pipeline_t *pipeline = get_pipeline(pass, draw_command->pipeline);
     if (pipeline->push_constant_size > 0 && draw_command->push_constant_data)
@@ -342,8 +334,10 @@ void VulkanPass_AddDrawCommand(const draw_command_t *draw_command)
                                                           pipeline->push_constant_size);
         MemoryCopy(push_constant_copy, draw_command->push_constant_data,
                    pipeline->push_constant_size);
-        slot->push_constant_data = push_constant_copy;
+        copy->push_constant_data = push_constant_copy;
     }
+
+    SLL_InsertLast(pass->draw_commands_head, pass->draw_commands_tail, copy, next);
 }
 
 bool VulkanPass_BakeCommandBuffer(VkCommandBuffer command_buffer, u32 image_index)
@@ -511,9 +505,10 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
     // TODO sort draw commands by pipeline to minimize rebinds
 
     const pipeline_t *bound_pipeline = NULL;
-    for (u32 i = 0; i < pass->draw_command_count; i++)
+    while (pass->draw_commands_head)
     {
-        const draw_command_t *command = &pass->draw_commands[i];
+        const draw_command_t *command = pass->draw_commands_head;
+        SLL_Pop(pass->draw_commands_head, next);
 
         const pipeline_t *pipeline = get_pipeline(pass, command->pipeline);
 

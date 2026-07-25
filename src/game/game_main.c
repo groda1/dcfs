@@ -98,7 +98,6 @@ typedef struct
 
     buffer_object_handle_t vp_uniform;
 
-
     i32 player_pos_x;
     i32 player_pos_y;
     i32 player_target_pos_x;

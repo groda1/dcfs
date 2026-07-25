@@ -113,4 +113,26 @@ typedef double      f64;
 #define ArrayCount(a) (sizeof(a) / sizeof((a)[0]))
 
 
+// List macros
+#define SLL_PushFirst(list, item, next) do { \
+    (item)->next = (list);              \
+    (list) = (item);                    \
+} while (0)
+
+#define SLL_InsertLast(first, last, item, next) do { \
+    if ((first) == 0) {                              \
+        (first) = (last) = (item);                   \
+        (item)->next = 0;                            \
+    } else {                                         \
+        (last)->next = (item);                       \
+        (last) = (item);                             \
+        (item)->next = 0;                            \
+    }                                                \
+} while (0)
+
+
+#define SLL_Pop(list, next) do {  \
+    (list) = (list)->next;        \
+} while (0)
+
 #endif
