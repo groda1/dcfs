@@ -20,8 +20,8 @@
 #define TILE_COLOR_A            V4(0.30f, 0.42f, 0.28f, 1.0f)
 #define TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
 
-#define PLAYER_SIZE             0.7f
-#define PLAYER_MOVE_SPEED       7.0f;
+#define PLAYER_SCALE            1.0f
+#define PLAYER_MOVE_SPEED       7.0f
 #define PLAYER_BUMP_SPEED       5.0f
 #define PLAYER_BUMP_DISTANCE    0.3f
 
@@ -89,7 +89,8 @@ typedef struct
     mesh_handle_t quad_mesh;
     model_handle_t player_model;
     model_instance_handle_t player_model_instance;
-    model_animation_handle_t player_wave_anim;
+    model_animation_handle_t player_walk_anim;
+    model_animation_handle_t player_attack_anim;
 
     pipeline_handle_t tile_pipeline;
     buffer_object_handle_t tile_sbo;
@@ -150,8 +151,7 @@ bool Game_Init(platform_window_t *window)
     if (g_game.vp_uniform == BUFFER_OBJECT_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create view projection uniform");
-        Engine_Destroy();
-        return false;
+        goto error;
     }
 
     pipeline_config_t tile_pipeline_config = {
@@ -175,8 +175,7 @@ bool Game_Init(platform_window_t *window)
     if (g_game.tile_pipeline == PIPELINE_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create tile pipeline");
-        Engine_Destroy();
-        return false;
+        goto error;
     }
 
     pipeline_config_t player_pipeline_config = {
@@ -204,28 +203,33 @@ bool Game_Init(platform_window_t *window)
         return false;
     }
 
-    g_game.player_model = Frog_LoadModel("resources/models/human.frog");
+    g_game.player_model = Frog_LoadModel("resources/models/player.frog");
     if (g_game.player_model == MODEL_INVALID_HANDLE)
     {
         Log(ERROR, "failed to load player model");
-        Engine_Destroy();
-        return false;
+        goto error;
     }
 
     g_game.player_model_instance = ModelInstance_New(g_game.player_model);
     if (g_game.player_model_instance == MODEL_INSTANCE_INVALID_HANDLE)
     {
         Log(ERROR, "failed to create player model instance");
-        Engine_Destroy();
-        return false;
+        goto error;
     }
 
-    g_game.player_wave_anim = Model_GetAnimation(g_game.player_model, "wave");
-    if (g_game.player_wave_anim == MODEL_ANIMATION_INVALID_HANDLE)
+    if (!ModelInstance_SetIdleAnimation(g_game.player_model_instance, "idle"))
+    {
+        Log(ERROR, "failed to set idle animation");
+        goto error;
+    }
+
+    g_game.player_walk_anim = Model_GetAnimation(g_game.player_model, "walk");
+    g_game.player_attack_anim = Model_GetAnimation(g_game.player_model, "attack");
+    if (g_game.player_walk_anim == MODEL_ANIMATION_INVALID_HANDLE ||
+        g_game.player_attack_anim == MODEL_ANIMATION_INVALID_HANDLE)
     {
         Log(ERROR, "failed load player animation");
-        Engine_Destroy();
-        return false;
+        goto error;
     }
 
     g_game.player_pos_x = GRID_WIDTH / 2;
@@ -240,6 +244,10 @@ bool Game_Init(platform_window_t *window)
     g_game.camera_blend = 1.0f;     /* already settled on the default rig */
 
     return true;
+
+error:
+    Engine_Destroy();
+    return false;
 }
 
 void Game_Destroy(void)
@@ -275,7 +283,7 @@ void Game_HandleKeyDown(key_code_t key)
     }
     if (key == KEY_L)
     {
-        ModelInstance_PlayAnimation(game->player_model_instance, game->player_wave_anim);
+        ModelInstance_PlayAnimation(game->player_model_instance, game->player_attack_anim);
         return;
     }
 
@@ -587,7 +595,7 @@ static void draw_player(void)
                         HMM_Translate( g_game.player_gfx_pos),
                         HMM_MulM4(
                             HMM_Rotate_RH(HMM_AngleDeg(g_game.player_gfx_rot), V3(0.0f, 1.0f, 0.0f)),
-                            HMM_Scale(V3(PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE))
+                            HMM_Scale(V3(PLAYER_SCALE, PLAYER_SCALE, PLAYER_SCALE))
                         )
                     );
 
@@ -603,7 +611,7 @@ static vec3 tile_center(i32 x, i32 y)
 
 static vec3 player_center(i32 x, i32 y)
 {
-    return V3((f32)x + 0.5f, PLAYER_SIZE / 2.0f, (f32)-y + 0.5f);
+    return V3((f32)x + 0.5f, 0.0f, (f32)-y + 0.5f);
 }
 
 static inline f32 wrap_angle_deg(f32 angle)
@@ -652,6 +660,8 @@ static bool player_attempt_move(i32 new_x, i32 new_y)
         game->player_target_pos_x = new_x;
         game->player_target_pos_y = new_y;
         game->player_anim = PLAYER_ANIM_MOVE;
+
+        ModelInstance_PlayAnimation(game->player_model_instance, game->player_walk_anim);
         return true;
     }
 

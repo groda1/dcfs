@@ -48,6 +48,8 @@ bool ModelInstance_PlayAnimation(model_instance_handle_t instance, model_animati
 
 void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time);
 
+bool ModelInstance_SetIdleAnimation(model_instance_handle_t instance, const char *animation_name);
+
 model_animation_handle_t Model_GetAnimation(model_handle_t model, const char *animation_name);
 
 #endif

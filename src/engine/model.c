@@ -27,6 +27,7 @@ StaticAssert(offsetof(model_push_constant_t, transform) == 16,
 struct _model_instance_t
 {
     model_handle_t model;
+    model_animation_t *idle_animation;
 
     gpu_material_t *palette;
     buffer_object_handle_t palette_sbo;
@@ -165,6 +166,21 @@ bool ModelInstance_PlayAnimation(model_instance_handle_t instance, model_animati
     return true;
 }
 
+bool ModelInstance_SetIdleAnimation(model_instance_handle_t instance, const char *animation_name)
+{
+    model_animation_handle_t handle = Model_GetAnimation(instance->model, animation_name);
+
+    if (handle == MODEL_ANIMATION_INVALID_HANDLE)
+    {
+        Log(WARNING, "model has no animation named %s", animation_name);
+        return false;
+    }
+    instance->idle_animation = handle;
+    ModelInstance_PlayAnimation(instance, handle);
+
+    return true;
+}
+
 void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time)
 {
     model_animation_t *anim = instance->current_animation;
@@ -184,6 +200,9 @@ void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time)
         {
             instance->current_animation = MODEL_ANIMATION_INVALID_HANDLE;
             instance->keyframe_progress = 1.0f;
+
+            if (instance->idle_animation)
+                ModelInstance_PlayAnimation(instance, instance->idle_animation);
             return;
         }
 

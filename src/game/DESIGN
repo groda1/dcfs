@@ -493,6 +493,170 @@ stride/attribute tables — game code never spells out offsets.
     stream count is rejected with an error at submission.
 
 
+DECIDED: character authoring — rigid segments, not armatures
+------------------------------------------------------------
+
+The player model (resources/models/blender/player.blend) is built as a TREE
+OF RIGID MESH OBJECTS, one per body part, each object's ORIGIN placed on the
+joint it rotates around:
+
+    m_pelvis  (root)
+      m_torso
+        m_head            m_hair, m_mustache
+        m_arm_upper_*  ->  m_arm_lower_*  ->  m_hand_*
+      m_leg_upper_*    ->  m_leg_lower_*  ->  m_foot_*
+
+No armature, no skinning. Animation is object rotation, and the exporter
+already bakes each object's evaluated world transform into its vertices per
+keyframe, so a segmented rig costs nothing the format does not already pay.
+Reasons this is the right call and not a shortcut:
+
+  - it is the technique the target aesthetic came from. Alone in the Dark
+    and its contemporaries animated rigid chunks; smooth skinned deformation
+    on 900 triangles reads as neither 1992 nor modern.
+  - joints stay watertight by OVERLAP, not by weighting: every child segment
+    begins with a rounded ring that starts slightly inside its parent
+    (t < 0 in the limb builder), so a bend rotates the overlap instead of
+    opening a gap. This is the one thing to preserve when editing.
+  - every segment being rigid is what makes rigid equipment anchors correct
+    rather than approximate — a cuirass bolted to the torso anchor cannot
+    drift, because the torso genuinely is one rigid body.
+  - posing needs no rig UI: select the part, rotate. Nothing to maintain.
+
+Joint sign conventions, because they are easy to get backwards and one of
+them is not symmetric: a POSITIVE x rotation swings a limb BACKWARD. So a
+forward step is negative on the thigh, a knee bend is POSITIVE on the shin
+(knees fold backward), and an elbow bend is NEGATIVE on the forearm (elbows
+fold forward). Positive z yaws toward the character's LEFT (+X), so a
+right-handed coil is negative z on the torso and the strike swings it
+positive. Getting the forearm sign wrong hyperextends every elbow in the
+animation and is not obvious in a still frame.
+
+Anchors (all seven exported, ~28 bytes per keyframe each, so the cost of
+carrying unused ones is noise):
+
+    hand.r  hand.l    weapons / shields
+    head              helmets, hats
+    torso             body armor
+    back              cloaks, quivers, sheathed weapons
+    foot.r  foot.l    boots
+
+Grip convention, shared by every anchor and every weapon: the anchor's +Z is
+the weapon's long axis out of the fist and its ±Y is the way the edges face,
+so a weapon is authored UPRIGHT WITH ITS GRIP ON THE ORIGIN (the runtime's
+matrix is player_world * interpolated_anchor, so whatever sits on the weapon's
+origin lands in the hand). The hands rest at 148 degrees, i.e. blade hanging
+down and about 30 degrees forward: straight down hides the weapon behind the
+body at our camera pitch, straight out turns it into a lance.
+
+Animations so far: idle (0.98 s, loops, first pose == last), walk (0.25 s,
+one tile in two steps), attack (0.625 s, right-handed diagonal slash), bump
+(0.375 s, one step into a wall, both hands brace, push off and step back).
+
+
+DECIDED: the game sets an animation's duration, never the reverse
+------------------------------------------------------------------
+
+Today the runtime has no playback rate, so an animation plays at exactly
+its authored length and a game action has to be retimed to match it —
+PLAYER_MOVE_SPEED is 4.0 only because the walk happens to be 0.250 s. That
+is backwards and does not scale: how fast a step or a bump feels is a
+gameplay decision, and the moment monsters arrive, every creature's attack
+length would start dictating its own combat timing constant.
+
+So the tuning constants stay gameplay-owned and the animation is fitted to
+them:
+
+    ModelInstance_PlayAnimationFor(instance, animation, seconds)
+
+The call site passes what it actually knows — how long this action lasts —
+and the engine derives the scale, rather than the caller computing a ratio
+against a length it has to look up. Plain PlayAnimation stays for anything
+nothing gates (idle, one-shot flourishes) and means "authored speed".
+
+Cheap to build, and needs no format change or re-export: an animation's
+length is already keyframes[keyframe_count - 1].time_s. The instance gains
+one f32 time scale and Update multiplies delta_time by it.
+
+The payoff is bigger than tidiness. The client is already specified to
+buffer events and play them at its own pace, fast-forwarding when the queue
+is deep (see "message flow"); a per-instance time scale is exactly the
+mechanism that makes fast-forward possible at all. Building it for the
+right reason now means it is already there then.
+
+Caveat: scaling is uniform, so squashing a 0.375 s bump into 0.2 s speeds up
+the wind-up and the recovery equally. That is what every engine does and it
+is fine over a modest range, but it means the authored length is still a
+"natural speed" hint — push far from it and the motion reads wrong. Author
+near the intended duration anyway; the API is there so a retune does not
+require a re-export, not so the same clip can cover 0.1 s and 1.0 s.
+
+Corollary the walk is authored around: it starts AND ends on the neutral
+stand, with the two steps in between. That makes held-key movement chain
+seamlessly — each tile restarts the animation from a pose it is already in —
+and leaves a stopped character standing rather than frozen mid-stride. Any
+replacement walk has to keep that property.
+
+DECIDED: geometry lives in the .blend, animation lives in a script
+------------------------------------------------------------------
+
+Art generators live in tools/gen/, with modelkit.py holding the shared
+lofting and rig plumbing:
+
+    make_player.py      builds the player mesh + rig + anchors from scratch
+    animate_player.py   applies the player's animations to an EXISTING .blend
+    make_sword.py       builds the sword
+    preview_model.py    headless pose sheets
+
+The split between the first two is the workflow decision. Generating a
+model from a script is fine once, but it stops working the moment the
+.blend is hand-edited and then a new animation is wanted: re-running the
+generator throws the edits away. So ownership is split down a line the rig
+already provides — the pose tables only ever set rotation_euler, plus
+location on the root, on objects looked up BY NAME. They never read a
+vertex. Therefore:
+
+  - the .blend owns geometry. Reshape meshes, move origins, change
+    materials, parent new rigid children onto a segment (a ponytail on
+    m_head, a belt on m_pelvis) — all invisible to animate_player.py, and
+    a new rigid child inherits its parent's animation for free.
+  - animate_player.py owns animation. It wipes existing actions and markers
+    and rewrites all of them, so adding an animation is: write a pose
+    table, re-run it against the .blend.
+
+Re-running is idempotent, and geometry comes out byte-identical. The rest
+pose is read back at REST_FRAME (the first frame of idle, where every
+authored pose is zero), and poses are applied ON TOP of whatever rest
+rotation an object carries — so rotating a shoulder in the viewport to
+change the stance survives every animation.
+
+The costs of the split, stated so they are not a surprise:
+
+  - hand-posing in the viewport does NOT survive; the next run overwrites
+    it. If that becomes the way we want to author, the fix is a read-back
+    that walks the F-curves and prints them as pose() calls, so the
+    viewport becomes the editor and the script stays authoritative. Not
+    built.
+  - renaming or reparenting an animated segment fails loudly with a
+    KeyError rather than silently doing nothing.
+  - splitting a segment into a new independently moving joint means adding
+    its name to ANIMATED; existing poses then leave it at zero.
+
+make_player.py still produces a complete model — it builds the mesh and
+then calls animate_player.apply() — but it refuses to overwrite an existing
+.blend without --force, because that path discards hand edits.
+
+preview_model.py can hang one model off another's anchor (--attach
+sword.blend:hand.r), which is how an anchor's pose gets checked without
+writing engine code first.
+
+NOT DONE: the runtime half of anchoring. frog.c loads the per-keyframe
+anchor transforms into model_keyframe_t, but model.h exposes no way to ask
+for one, so nothing can be attached in game yet. What is missing is a lookup
+by name plus a lerp/slerp with the same keyframe_progress the vertex blend
+uses, and a second draw call for the weapon.
+
+
 MILESTONE 2 (agreed): one room, walking cube
 --------------------------------------------
 
