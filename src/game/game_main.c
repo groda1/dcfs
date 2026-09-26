@@ -47,7 +47,7 @@
 #define CAMERA_NEAR                 0.1f
 #define CAMERA_FAR                  100.0f
 
-#define GAME_SLOWMOTION_FACTOR      0.2f
+#define GAME_SLOWMOTION_FACTOR      1.0f
 
 typedef struct
 {

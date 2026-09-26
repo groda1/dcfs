@@ -328,91 +328,99 @@ def build_attack():
 
 def build_bump():
     """Walk into a wall: one step in, both hands brace against it, push off
-    and step back. Reads as a checked step rather than a recoil, so the
-    elbows have to fold while the hands stay put -- the arms only shorten by
-    as much as the root actually travels after contact."""
+    and step back.
+
+    Everything is kept close to the body on purpose. The wall face is half a
+    tile from the player origin, which at PLAYER_SCALE 0.7 is only ~0.71 in
+    model units, and the reach has to fit inside that or the hands and the
+    lead foot poke through it. So this is a short step and a folded-elbow
+    brace rather than a lunge with the arms out.
+
+    The elbows fold by exactly as much as the root travels forward after
+    contact, which keeps the hands planted in world space at y ~= -0.45
+    through the whole brace instead of sliding into the wall."""
     f = BUMP_START
 
     pose(f + 0)
 
     pose(f + 2,
-         root=(0, -0.008, -0.004),
+         root=(0, -0.006, -0.003),
          torso=(3, 0, 0), head=(2, 0, 0),
-         arm_upper_r=(-20, 0, -4), arm_lower_r=(-16, 0, 0), hand_r=(-8, 0, 0),
-         arm_upper_l=(-20, 0, 4), arm_lower_l=(-16, 0, 0), hand_l=(-8, 0, 0),
-         leg_upper_r=(-14, 0, 0), leg_lower_r=(18, 0, 0), foot_r=(-8, 0, 0),
-         leg_upper_l=(7, 0, 0), leg_lower_l=(7, 0, 0))
+         arm_upper_r=(-16, 0, -4), arm_lower_r=(-22, 0, 0), hand_r=(-6, 0, 0),
+         arm_upper_l=(-16, 0, 4), arm_lower_l=(-22, 0, 0), hand_l=(-6, 0, 0),
+         leg_upper_r=(-10, 0, 0), leg_lower_r=(16, 0, 0), foot_r=(-6, 0, 0),
+         leg_upper_l=(5, 0, 0), leg_lower_l=(6, 0, 0))
 
     pose(f + 4,
-         root=(0, -0.026, -0.010),
-         torso=(7, 0, 0), head=(4, 0, 0),
-         arm_upper_r=(-46, 0, -9), arm_lower_r=(-32, 0, 0), hand_r=(-24, 0, 0),
-         arm_upper_l=(-46, 0, 9), arm_lower_l=(-32, 0, 0), hand_l=(-24, 0, 0),
-         leg_upper_r=(-28, 0, 0), leg_lower_r=(16, 0, 0), foot_r=(-4, 0, 0),
-         leg_upper_l=(13, 0, 0), leg_lower_l=(13, 0, 0), foot_l=(-8, 0, 0))
+         root=(0, -0.018, -0.008),
+         torso=(6, 0, 0), head=(4, 0, 0),
+         arm_upper_r=(-28, 0, -10), arm_lower_r=(-68, 0, 0), hand_r=(-32, 0, 0),
+         arm_upper_l=(-28, 0, 10), arm_lower_l=(-68, 0, 0), hand_l=(-32, 0, 0),
+         leg_upper_r=(-18, 0, 0), leg_lower_r=(16, 0, 0), foot_r=(-2, 0, 0),
+         leg_upper_l=(10, 0, 0), leg_lower_l=(11, 0, 0), foot_l=(-6, 0, 0))
 
     pose(f + 6,
-         root=(0, -0.048, -0.018),
-         torso=(11, 0, 0), head=(6, 0, 0),
-         arm_upper_r=(-66, 0, -12), arm_lower_r=(-36, 0, 0), hand_r=(-42, 0, 0),
-         arm_upper_l=(-66, 0, 12), arm_lower_l=(-36, 0, 0), hand_l=(-42, 0, 0),
-         leg_upper_r=(-34, 0, 0), leg_lower_r=(7, 0, 0), foot_r=(5, 0, 0),
-         leg_upper_l=(17, 0, 0), leg_lower_l=(17, 0, 0), foot_l=(-14, 0, 0))
+         root=(0, -0.034, -0.014),
+         torso=(9, 0, 0), head=(5, 0, 0),
+         arm_upper_r=(-38, 0, -16), arm_lower_r=(-92, 0, 0), hand_r=(-48, 0, 0),
+         arm_upper_l=(-38, 0, 16), arm_lower_l=(-92, 0, 0), hand_l=(-48, 0, 0),
+         leg_upper_r=(-21, 0, 0), leg_lower_r=(10, 0, 0), foot_r=(4, 0, 0),
+         leg_upper_l=(13, 0, 0), leg_lower_l=(14, 0, 0), foot_l=(-11, 0, 0))
 
     pose(f + 7,
-         root=(0, -0.062, -0.022),
-         torso=(13, 0, 0), head=(7, 0, 0),
-         arm_upper_r=(-72, 0, -13), arm_lower_r=(-36, 0, 0), hand_r=(-52, 0, 0),
-         arm_upper_l=(-72, 0, 13), arm_lower_l=(-36, 0, 0), hand_l=(-52, 0, 0),
-         leg_upper_r=(-35, 0, 0), leg_lower_r=(9, 0, 0), foot_r=(6, 0, 0),
-         leg_upper_l=(18, 0, 0), leg_lower_l=(19, 0, 0), foot_l=(-16, 0, 0))
+         root=(0, -0.045, -0.018),
+         torso=(10, 0, 0), head=(6, 0, 0),
+         arm_upper_r=(-40, 0, -18), arm_lower_r=(-98, 0, 0), hand_r=(-52, 0, 0),
+         arm_upper_l=(-40, 0, 18), arm_lower_l=(-98, 0, 0), hand_l=(-52, 0, 0),
+         leg_upper_r=(-21, 0, 0), leg_lower_r=(12, 0, 0), foot_r=(6, 0, 0),
+         leg_upper_l=(14, 0, 0), leg_lower_l=(16, 0, 0), foot_l=(-13, 0, 0))
 
     pose(f + 8,
-         root=(0, -0.086, -0.030),
-         torso=(11, 0, 0), head=(0, 0, 0),
-         arm_upper_r=(-68, 0, -22), arm_lower_r=(-48, 0, 0), hand_r=(-56, 0, 0),
-         arm_upper_l=(-68, 0, 22), arm_lower_l=(-48, 0, 0), hand_l=(-56, 0, 0),
-         leg_upper_r=(-32, 0, 0), leg_lower_r=(16, 0, 0), foot_r=(8, 0, 0),
-         leg_upper_l=(19, 0, 0), leg_lower_l=(24, 0, 0), foot_l=(-18, 0, 0))
+         root=(0, -0.068, -0.026),
+         torso=(8, 0, 0), head=(1, 0, 0),
+         arm_upper_r=(-38, 0, -24), arm_lower_r=(-104, 0, 0), hand_r=(-54, 0, 0),
+         arm_upper_l=(-38, 0, 24), arm_lower_l=(-104, 0, 0), hand_l=(-54, 0, 0),
+         leg_upper_r=(-20, 0, 0), leg_lower_r=(15, 0, 0), foot_r=(8, 0, 0),
+         leg_upper_l=(15, 0, 0), leg_lower_l=(20, 0, 0), foot_l=(-14, 0, 0))
 
     pose(f + 9,
-         root=(0, -0.100, -0.040),
-         torso=(7, 0, 0), head=(-8, 0, 0),
-         arm_upper_r=(-64, 0, -30), arm_lower_r=(-58, 0, 0), hand_r=(-58, 0, 0),
-         arm_upper_l=(-64, 0, 30), arm_lower_l=(-58, 0, 0), hand_l=(-58, 0, 0),
-         leg_upper_r=(-29, 0, 0), leg_lower_r=(23, 0, 0), foot_r=(10, 0, 0),
-         leg_upper_l=(18, 0, 0), leg_lower_l=(27, 0, 0), foot_l=(-18, 0, 0))
+         root=(0, -0.085, -0.034),
+         torso=(5, 0, 0), head=(-7, 0, 0),
+         arm_upper_r=(-36, 0, -30), arm_lower_r=(-108, 0, 0), hand_r=(-56, 0, 0),
+         arm_upper_l=(-36, 0, 30), arm_lower_l=(-108, 0, 0), hand_l=(-56, 0, 0),
+         leg_upper_r=(-19, 0, 0), leg_lower_r=(18, 0, 0), foot_r=(9, 0, 0),
+         leg_upper_l=(14, 0, 0), leg_lower_l=(23, 0, 0), foot_l=(-14, 0, 0))
 
     pose(f + 10,
-         root=(0, -0.078, -0.036),
-         torso=(2, 0, 0), head=(-10, 0, 0),
-         arm_upper_r=(-66, 0, -24), arm_lower_r=(-40, 0, 0), hand_r=(-52, 0, 0),
-         arm_upper_l=(-66, 0, 24), arm_lower_l=(-40, 0, 0), hand_l=(-52, 0, 0),
-         leg_upper_r=(-27, 0, 0), leg_lower_r=(20, 0, 0), foot_r=(8, 0, 0),
-         leg_upper_l=(15, 0, 0), leg_lower_l=(22, 0, 0), foot_l=(-14, 0, 0))
+         root=(0, -0.062, -0.030),
+         torso=(1, 0, 0), head=(-9, 0, 0),
+         arm_upper_r=(-38, 0, -24), arm_lower_r=(-92, 0, 0), hand_r=(-50, 0, 0),
+         arm_upper_l=(-38, 0, 24), arm_lower_l=(-92, 0, 0), hand_l=(-50, 0, 0),
+         leg_upper_r=(-16, 0, 0), leg_lower_r=(19, 0, 0), foot_r=(7, 0, 0),
+         leg_upper_l=(12, 0, 0), leg_lower_l=(19, 0, 0), foot_l=(-11, 0, 0))
 
     pose(f + 12,
-         root=(0, -0.022, -0.024),
-         torso=(-4, 0, 0), head=(-8, 0, 0),
-         arm_upper_r=(-44, 0, -14), arm_lower_r=(-28, 0, 0), hand_r=(-32, 0, 0),
-         arm_upper_l=(-44, 0, 14), arm_lower_l=(-28, 0, 0), hand_l=(-32, 0, 0),
-         leg_upper_r=(-14, 0, 0), leg_lower_r=(30, 0, 0), foot_r=(-8, 0, 0),
-         leg_upper_l=(8, 0, 0), leg_lower_l=(12, 0, 0))
+         root=(0, -0.016, -0.020),
+         torso=(-4, 0, 0), head=(-7, 0, 0),
+         arm_upper_r=(-26, 0, -12), arm_lower_r=(-60, 0, 0), hand_r=(-32, 0, 0),
+         arm_upper_l=(-26, 0, 12), arm_lower_l=(-60, 0, 0), hand_l=(-32, 0, 0),
+         leg_upper_r=(-9, 0, 0), leg_lower_r=(26, 0, 0), foot_r=(-6, 0, 0),
+         leg_upper_l=(7, 0, 0), leg_lower_l=(11, 0, 0))
 
     pose(f + 14,
-         root=(0, 0.014, -0.012),
+         root=(0, 0.010, -0.010),
          torso=(-5, 0, 0), head=(-4, 0, 0),
-         arm_upper_r=(-20, 0, -6), arm_lower_r=(-16, 0, 0), hand_r=(-14, 0, 0),
-         arm_upper_l=(-20, 0, 6), arm_lower_l=(-16, 0, 0), hand_l=(-14, 0, 0),
-         leg_upper_r=(4, 0, 0), leg_lower_r=(14, 0, 0), foot_r=(-4, 0, 0),
-         leg_upper_l=(-2, 0, 0), leg_lower_l=(6, 0, 0))
+         arm_upper_r=(-13, 0, -5), arm_lower_r=(-26, 0, 0), hand_r=(-11, 0, 0),
+         arm_upper_l=(-13, 0, 5), arm_lower_l=(-26, 0, 0), hand_l=(-11, 0, 0),
+         leg_upper_r=(3, 0, 0), leg_lower_r=(12, 0, 0), foot_r=(-3, 0, 0),
+         leg_upper_l=(-2, 0, 0), leg_lower_l=(5, 0, 0))
 
     pose(f + 16,
-         root=(0, 0.006, -0.004),
+         root=(0, 0.004, -0.003),
          torso=(-2, 0, 0), head=(-1, 0, 0),
-         arm_upper_r=(-7, 0, -2), arm_lower_r=(-6, 0, 0), hand_r=(-4, 0, 0),
-         arm_upper_l=(-7, 0, 2), arm_lower_l=(-6, 0, 0), hand_l=(-4, 0, 0),
-         leg_upper_r=(2, 0, 0), leg_lower_r=(5, 0, 0),
+         arm_upper_r=(-5, 0, -2), arm_lower_r=(-10, 0, 0), hand_r=(-3, 0, 0),
+         arm_upper_l=(-5, 0, 2), arm_lower_l=(-10, 0, 0), hand_l=(-3, 0, 0),
+         leg_upper_r=(1, 0, 0), leg_lower_r=(4, 0, 0),
          leg_upper_l=(-1, 0, 0), leg_lower_l=(2, 0, 0))
 
     pose(f + 18)
