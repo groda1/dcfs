@@ -15,16 +15,16 @@
 #include "frog.h"
 
 #define GRID_WIDTH              256
-#define GRID_HEIGHT             256
-#define TILE_GAP                0.0f
-#define TILE_COLOR_A            V4(0.30f, 0.42f, 0.28f, 1.0f)
-#define TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
+#define GRID_HEIGHT             128
+#define FLOOR_TILE_COLOR_A            V4(0.30f, 0.42f, 0.28f, 1.0f)
+#define FLOOR_TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
+#define WALL_HEIGHT             2.0f
 
 #define PLAYER_SCALE            1.0f
 #define PLAYER_MOVE_SPEED       7.0f
 #define PLAYER_BUMP_SPEED       5.0f
-#define PLAYER_BUMP_DISTANCE    0.3f
-#define PLAYER_WALK_ANIM_SPEED  1.5f
+#define PLAYER_BUMP_DISTANCE    0.05f
+#define PLAYER_WALK_ANIM_SPEED  1.71f
 
 #define CAMERA_BOT_CLAMP -2.0f
 #define CAMERA_TOP_CLAMP 5.0f
@@ -46,6 +46,8 @@
 #define CAMERA_FLY_SPEED            2.5f
 #define CAMERA_NEAR                 0.1f
 #define CAMERA_FAR                  100.0f
+
+#define GAME_SLOWMOTION_FACTOR      0.2f
 
 typedef struct
 {
@@ -92,9 +94,12 @@ typedef struct
     model_animation_handle_t player_walk_l_anim;
     model_animation_handle_t player_walk_r_anim;
     model_animation_handle_t player_attack_anim;
+    model_animation_handle_t player_bump_anim;
 
-    pipeline_handle_t tile_pipeline;
-    buffer_object_handle_t tile_sbo;
+    pipeline_handle_t floor_pipeline;
+    buffer_object_handle_t floor_sbo;
+    pipeline_handle_t wall_pipeline;
+    buffer_object_handle_t wall_sbo;
 
     pipeline_handle_t player_pipeline;
 
@@ -128,6 +133,8 @@ typedef struct
 
 static game_t g_game;
 
+static u8 g_grid[GRID_HEIGHT][GRID_WIDTH];
+
 static void update_player(f32 delta_time);
 static void update_player_move(f32 delta_time);
 static void update_player_bump(f32 delta_time);
@@ -157,10 +164,10 @@ bool Game_Init(platform_window_t *window)
         goto error;
     }
 
-    pipeline_config_t tile_pipeline_config = {
-        .name = "grid-tile",
-        .vertex_shader = Renderer_LoadShader("shaders/tile.vert.spv"),
-        .fragment_shader = Renderer_LoadShader("shaders/tile.frag.spv"),
+    pipeline_config_t floor_pipeline_config = {
+        .name = "grid-floor",
+        .vertex_shader = Renderer_LoadShader("shaders/floor.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/floor.frag.spv"),
         .push_constant_size = sizeof(tile_push_constant_t),
         .vertex_layout = &VERTEX_LAYOUT_NORMAL,
         .uniform_binding_count = 1,
@@ -172,14 +179,39 @@ bool Game_Init(platform_window_t *window)
             },
         },
     };
-    g_game.tile_sbo = Renderer_CreateStorageBuffer(KB(64));
+    g_game.floor_sbo = Renderer_CreateStorageBuffer(KB(64));
 
-    g_game.tile_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &tile_pipeline_config);
-    if (g_game.tile_pipeline == PIPELINE_HANDLE_INVALID)
+    g_game.floor_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &floor_pipeline_config);
+    if (g_game.floor_pipeline == PIPELINE_HANDLE_INVALID)
     {
-        Log(ERROR, "failed to create tile pipeline");
+        Log(ERROR, "failed to create floor pipeline");
         goto error;
     }
+
+    pipeline_config_t wall_pipeline_config = {
+        .name = "grid-wall",
+        .vertex_shader = Renderer_LoadShader("shaders/wall.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/wall.frag.spv"),
+        .push_constant_size = sizeof(tile_push_constant_t),
+        .vertex_layout = &VERTEX_LAYOUT_NORMAL,
+        .uniform_binding_count = 1,
+        .uniform_bindings = {
+            {
+                .binding = 0,
+                .buffer_object = g_game.vp_uniform,
+                .stage = UNIFORM_STAGE_VERTEX,
+            },
+        },
+    };
+    g_game.wall_sbo = Renderer_CreateStorageBuffer(KB(64));
+
+    g_game.wall_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &wall_pipeline_config);
+    if (g_game.wall_pipeline == PIPELINE_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create wall pipeline");
+        goto error;
+    }
+
 
     pipeline_config_t player_pipeline_config = {
         .name = "player",
@@ -229,9 +261,11 @@ bool Game_Init(platform_window_t *window)
     g_game.player_walk_r_anim = Model_GetAnimation(g_game.player_model, "walk_r");
     g_game.player_walk_l_anim = Model_GetAnimation(g_game.player_model, "walk_l");
     g_game.player_attack_anim = Model_GetAnimation(g_game.player_model, "attack");
+    g_game.player_bump_anim   = Model_GetAnimation(g_game.player_model, "bump");
     if (g_game.player_walk_r_anim == MODEL_ANIMATION_INVALID_HANDLE ||
         g_game.player_walk_l_anim == MODEL_ANIMATION_INVALID_HANDLE ||
-        g_game.player_attack_anim == MODEL_ANIMATION_INVALID_HANDLE)
+        g_game.player_attack_anim == MODEL_ANIMATION_INVALID_HANDLE ||
+        g_game.player_bump_anim == MODEL_ANIMATION_INVALID_HANDLE)
     {
         Log(ERROR, "failed load player animation");
         goto error;
@@ -247,6 +281,29 @@ bool Game_Init(platform_window_t *window)
     g_game.camera_target = g_game.player_gfx_pos;
     g_game.camera_mode = CAMERA_MODE_DEFAULT;
     g_game.camera_blend = 1.0f;     /* already settled on the default rig */
+
+    MemoryZero(g_grid, sizeof(g_grid));
+
+    for (i32 i = 0; i < 10; i++)
+    {
+        g_grid[55 + i][124] = 1;
+    }
+    for (i32 i = 0; i < 10; i++)
+    {
+        g_grid[55 + i][134] = 1;
+    }
+    for (i32 i = 0; i < 11; i++)
+    {
+        g_grid[55][124 + i] = 1;
+    }
+    for (i32 i = 0; i < 11; i++)
+    {
+        g_grid[65][124 + i] = 1;
+    }
+    g_grid[60][134] = 0;
+    g_grid[61][134] = 0;
+    g_grid[62][134] = 0;
+
 
     return true;
 
@@ -365,6 +422,8 @@ void Game_Tick(void)
 {
     f32 delta_time = Engine_BeginFrame();
 
+    delta_time *= GAME_SLOWMOTION_FACTOR;
+
     update_player(delta_time);
     update_camera(delta_time);
 
@@ -402,7 +461,7 @@ static void update_player_move(f32 delta_time)
         t = 1.0f;
 
     vec3 old = player_center(game->player_pos_x, game->player_pos_y);
-    game->player_gfx_pos = lerp(old, smoothstep(t), game->player_gfx_target_pos);
+    game->player_gfx_pos = lerp(old, t, game->player_gfx_target_pos);
     game->player_gfx_rot = lerp(game->player_gfx_old_rot, smoothstep(t), game->player_gfx_target_rot);
 
     if (game->player_anim_progress >= 1.0f)
@@ -556,11 +615,15 @@ static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
 
-    Renderer_ClearBufferObject(g_game.tile_sbo);
+    Renderer_ClearBufferObject(g_game.floor_sbo);
+    Renderer_ClearBufferObject(g_game.wall_sbo);
 
-    mat4 scale = HMM_Scale(V3(1.0f - TILE_GAP, 1.0f, 1.0f - TILE_GAP));
-    mat4 rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
-    u64 instance_count = 0;
+    mat4 floor_scale = HMM_Scale(V3(1.0f, 1.0f, 1.0f));
+    mat4 floor_rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
+    u64  floor_instance_count = 0;
+
+    mat4 wall_scale = HMM_Scale(V3(1.0f, WALL_HEIGHT, 1.0f));
+    u64  wall_instance_count = 0;
 
     // TODO: this can be heavily optimized
     i32 start_x =   ClampBot(0, g_game.player_pos_x - 20);
@@ -572,26 +635,49 @@ static void draw_grid(void)
     {
         for (i32 x = start_x; x < end_x; x++)
         {
-            vec3 center = tile_center(x, y);
+            vec3 floor_center = tile_center(x, y);
 
-            tile_instance_t instance = {
-                .transform = HMM_MulM4(
-                                HMM_Translate(center),
-                                HMM_MulM4(
-                                    rotation,
-                                    scale)),
-                .color = ((x + y) & 1) ? TILE_COLOR_A : TILE_COLOR_B,
-            };
+            if (g_grid[y][x])
+            {
+                vec3 wall_center = floor_center;
+                wall_center.Y = WALL_HEIGHT / 2.0f;
+                tile_instance_t instance = {
+                    .transform = HMM_MulM4(
+                                    HMM_Translate(wall_center),
+                                    wall_scale),
+                    .color = V4(0.4f, 0.4f, 0.2f, 1.0f)
+                };
+                Renderer_PushBufferObject(g_game.wall_sbo, &instance, sizeof(instance));
+                wall_instance_count++;
+            }
+            else
+            {
+                tile_instance_t instance = {
+                    .transform = HMM_MulM4(
+                                    HMM_Translate(floor_center),
+                                    HMM_MulM4(
+                                        floor_rotation,
+                                        floor_scale)),
+                    .color = ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B,
+                };
 
-            Renderer_PushBufferObject(g_game.tile_sbo, &instance, sizeof(instance));
-            instance_count++;
+                Renderer_PushBufferObject(g_game.floor_sbo, &instance, sizeof(instance));
+                floor_instance_count++;
+            }
         }
     }
+
     Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
-        g_game.tile_pipeline,
+        g_game.floor_pipeline,
         &push_constant,
-        g_game.tile_sbo,
-        instance_count, g_game.quad_mesh);
+        g_game.floor_sbo,
+        floor_instance_count, g_game.quad_mesh);
+
+    Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
+        g_game.wall_pipeline,
+        &push_constant,
+        g_game.wall_sbo,
+        wall_instance_count, g_game.cube_mesh);
 }
 
 static void draw_player(void)
@@ -660,7 +746,9 @@ static bool player_attempt_move(i32 new_x, i32 new_y)
     game->player_gfx_target_rot = game->player_gfx_old_rot
                                 + wrap_angle_deg(rotation - game->player_gfx_old_rot);
 
-    if (new_x >= 0 && new_x < GRID_WIDTH && new_y >= 0 && new_y < GRID_HEIGHT)
+    // Allowed move
+    if (new_x >= 0 && new_x < GRID_WIDTH && new_y >= 0 && new_y < GRID_HEIGHT
+        && !g_grid[new_y][new_x])
     {
         game->player_target_pos_x = new_x;
         game->player_target_pos_y = new_y;
@@ -677,6 +765,8 @@ static bool player_attempt_move(i32 new_x, i32 new_y)
         return true;
     }
 
+    // Bump
     game->player_anim = PLAYER_ANIM_BUMP;
+    ModelInstance_PlayAnimation(game->player_model_instance, game->player_bump_anim);
     return false;
 }
