@@ -24,7 +24,7 @@
 #define PLAYER_MOVE_SPEED       7.0f
 #define PLAYER_BUMP_SPEED       5.0f
 #define PLAYER_BUMP_DISTANCE    0.3f
-
+#define PLAYER_WALK_ANIM_SPEED  1.5f
 
 #define CAMERA_BOT_CLAMP -2.0f
 #define CAMERA_TOP_CLAMP 5.0f
@@ -89,7 +89,8 @@ typedef struct
     mesh_handle_t quad_mesh;
     model_handle_t player_model;
     model_instance_handle_t player_model_instance;
-    model_animation_handle_t player_walk_anim;
+    model_animation_handle_t player_walk_l_anim;
+    model_animation_handle_t player_walk_r_anim;
     model_animation_handle_t player_attack_anim;
 
     pipeline_handle_t tile_pipeline;
@@ -120,6 +121,8 @@ typedef struct
 
     camera_rig_t camera_cur;
     camera_rig_t camera_from;
+
+    u32 step_count;
 
 } game_t;
 
@@ -223,9 +226,11 @@ bool Game_Init(platform_window_t *window)
         goto error;
     }
 
-    g_game.player_walk_anim = Model_GetAnimation(g_game.player_model, "walk");
+    g_game.player_walk_r_anim = Model_GetAnimation(g_game.player_model, "walk_r");
+    g_game.player_walk_l_anim = Model_GetAnimation(g_game.player_model, "walk_l");
     g_game.player_attack_anim = Model_GetAnimation(g_game.player_model, "attack");
-    if (g_game.player_walk_anim == MODEL_ANIMATION_INVALID_HANDLE ||
+    if (g_game.player_walk_r_anim == MODEL_ANIMATION_INVALID_HANDLE ||
+        g_game.player_walk_l_anim == MODEL_ANIMATION_INVALID_HANDLE ||
         g_game.player_attack_anim == MODEL_ANIMATION_INVALID_HANDLE)
     {
         Log(ERROR, "failed load player animation");
@@ -660,8 +665,15 @@ static bool player_attempt_move(i32 new_x, i32 new_y)
         game->player_target_pos_x = new_x;
         game->player_target_pos_y = new_y;
         game->player_anim = PLAYER_ANIM_MOVE;
+        game->step_count++;
 
-        ModelInstance_PlayAnimationS(game->player_model_instance, game->player_walk_anim, 0.5f);
+        model_animation_handle_t walk_anim;
+        if (game->step_count % 2)
+            walk_anim = game->player_walk_l_anim;
+        else
+            walk_anim = game->player_walk_r_anim;
+
+        ModelInstance_PlayAnimationS(game->player_model_instance, walk_anim, PLAYER_WALK_ANIM_SPEED);
         return true;
     }
 

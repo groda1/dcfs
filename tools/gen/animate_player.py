@@ -44,12 +44,15 @@ from modelkit import (OBJECTS, REST, bind_existing, clear_animation)   # noqa: E
 FPS = 48
 
 IDLE_START,   IDLE_END   = 1, 48
-WALK_START,   WALK_END   = 49, 61
-ATTACK_START, ATTACK_END = 62, 92
-BUMP_START,   BUMP_END   = 93, 111
+WALK_R_START, WALK_R_END = 49, 61
+WALK_L_START, WALK_L_END = 62, 74
+ATTACK_START, ATTACK_END = 75, 105
+BUMP_START,   BUMP_END   = 106, 124
 
 REST_FRAME = IDLE_START
 FRAME_START, FRAME_END = IDLE_START, BUMP_END
+
+STEP_FRAMES = WALK_R_END - WALK_R_START
 
 ANIMATED = [
     "m_pelvis", "m_torso", "m_head",
@@ -96,49 +99,87 @@ def build_idle():
     pose(b,  root=(0, 0, 0))
 
 
-def build_walk():
-    f = WALK_START
+def mirrored(parts):
+    """A pose reflected across x = 0: left and right swap, and yaw/roll flip.
+    walk_l is walk_r through this, which is what guarantees the two chain --
+    each one's end pose is literally the other one's start pose."""
+    out = {}
+    for name, v in parts.items():
+        if name == "root":
+            out[name] = (-v[0], v[1], v[2])
+        elif name.endswith("_r"):
+            out[name[:-2] + "_l"] = (v[0], -v[1], -v[2])
+        elif name.endswith("_l"):
+            out[name[:-2] + "_r"] = (v[0], -v[1], -v[2])
+        else:
+            out[name] = (v[0], -v[1], -v[2])
+    return out
 
-    pose(f + 0)
 
-    pose(f + 2,
-         root=(0, 0, -0.006),
-         leg_upper_r=(-16, 0, 0), leg_lower_r=(22, 0, 0), foot_r=(-6, 0, 0),
-         leg_upper_l=(10, 0, 0), leg_lower_l=(10, 0, 0),
-         arm_upper_r=(12, 0, -2), arm_upper_l=(-14, 0, 2),
-         torso=(1, 0, 2))
+STEP = [
+    (0, dict(
+        root=(0, 0, 0.010),
+        leg_upper_r=(-9, 0, 0), leg_lower_r=(36, 0, 0), foot_r=(-12, 0, 0),
+        leg_upper_l=(7, 0, 0), leg_lower_l=(4, 0, 0),
+        arm_upper_r=(6, 0, -2), arm_lower_r=(-12, 0, 0),
+        arm_upper_l=(-8, 0, 2), arm_lower_l=(-16, 0, 0),
+        torso=(2, 0, -1), head=(0, 0, 1))),
 
-    pose(f + 4,
-         root=(0, 0, -0.020),
-         leg_upper_r=(-26, 0, 0), leg_lower_r=(5, 0, 0), foot_r=(4, 0, 0),
-         leg_upper_l=(20, 0, 0), leg_lower_l=(18, 0, 0), foot_l=(-16, 0, 0),
-         arm_upper_r=(20, 0, -3), arm_lower_r=(-8, 0, 0),
-         arm_upper_l=(-22, 0, 3), arm_lower_l=(-22, 0, 0),
-         torso=(3, 0, 4), head=(-2, 0, -3))
+    (2, dict(
+        root=(0, 0, 0.003),
+        leg_upper_r=(-21, 0, 0), leg_lower_r=(27, 0, 0), foot_r=(-7, 0, 0),
+        leg_upper_l=(14, 0, 0), leg_lower_l=(7, 0, 0), foot_l=(-3, 0, 0),
+        arm_upper_r=(12, 0, -3), arm_lower_r=(-10, 0, 0),
+        arm_upper_l=(-16, 0, 3), arm_lower_l=(-19, 0, 0),
+        torso=(3, 0, -2), head=(0, 0, 2))),
 
-    pose(f + 6,
-         root=(0, 0, 0.012),
-         leg_upper_r=(6, 0, 0), leg_lower_r=(2, 0, 0),
-         leg_upper_l=(-10, 0, 0), leg_lower_l=(42, 0, 0), foot_l=(-8, 0, 0),
-         arm_upper_r=(4, 0, -2), arm_upper_l=(-4, 0, 2),
-         torso=(2, 0, 0))
+    (4, dict(
+        root=(0, 0, -0.011),
+        leg_upper_r=(-30, 0, 0), leg_lower_r=(13, 0, 0),
+        leg_upper_l=(21, 0, 0), leg_lower_l=(11, 0, 0), foot_l=(-9, 0, 0),
+        arm_upper_r=(18, 0, -4), arm_lower_r=(-8, 0, 0),
+        arm_upper_l=(-22, 0, 4), arm_lower_l=(-21, 0, 0),
+        torso=(4, 0, -3), head=(-1, 0, 3))),
 
-    pose(f + 8,
-         root=(0, 0, -0.020),
-         leg_upper_l=(-26, 0, 0), leg_lower_l=(5, 0, 0), foot_l=(4, 0, 0),
-         leg_upper_r=(20, 0, 0), leg_lower_r=(18, 0, 0), foot_r=(-16, 0, 0),
-         arm_upper_l=(20, 0, 3), arm_lower_l=(-8, 0, 0),
-         arm_upper_r=(-22, 0, -3), arm_lower_r=(-22, 0, 0),
-         torso=(3, 0, -4), head=(-2, 0, 3))
+    (6, dict(
+        root=(0, 0, -0.022),
+        leg_upper_r=(-32, 0, 0), leg_lower_r=(4, 0, 0), foot_r=(8, 0, 0),
+        leg_upper_l=(26, 0, 0), leg_lower_l=(17, 0, 0), foot_l=(-20, 0, 0),
+        arm_upper_r=(21, 0, -4), arm_lower_r=(-7, 0, 0),
+        arm_upper_l=(-25, 0, 4), arm_lower_l=(-23, 0, 0),
+        torso=(5, 0, -4), head=(-1, 0, 4))),
 
-    pose(f + 10,
-         root=(0, 0, 0.010),
-         leg_upper_l=(8, 0, 0), leg_lower_l=(2, 0, 0),
-         leg_upper_r=(-12, 0, 0), leg_lower_r=(30, 0, 0), foot_r=(-6, 0, 0),
-         arm_upper_l=(6, 0, 2), arm_upper_r=(-6, 0, -2),
-         torso=(2, 0, -1))
+    (8, dict(
+        root=(0, 0, -0.013),
+        leg_upper_r=(-19, 0, 0), leg_lower_r=(4, 0, 0), foot_r=(5, 0, 0),
+        leg_upper_l=(16, 0, 0), leg_lower_l=(32, 0, 0), foot_l=(-15, 0, 0),
+        arm_upper_r=(14, 0, -3), arm_lower_r=(-10, 0, 0),
+        arm_upper_l=(-15, 0, 3), arm_lower_l=(-19, 0, 0),
+        torso=(4, 0, -2), head=(-1, 0, 2))),
 
-    pose(f + 12)
+    (10, dict(
+        root=(0, 0, 0.002),
+        leg_upper_r=(-5, 0, 0), leg_lower_r=(7, 0, 0),
+        leg_upper_l=(2, 0, 0), leg_lower_l=(40, 0, 0), foot_l=(-15, 0, 0),
+        arm_upper_r=(3, 0, -2), arm_lower_r=(-13, 0, 0),
+        arm_upper_l=(-3, 0, 2), arm_lower_l=(-17, 0, 0),
+        torso=(3, 0, 0), head=(0, 0, 0))),
+]
+
+
+def build_step(start, flip):
+    for offset, parts in STEP:
+        pose(start + offset, **(mirrored(parts) if flip else parts))
+    pose(start + STEP_FRAMES,
+         **(STEP[0][1] if flip else mirrored(STEP[0][1])))
+
+
+def build_walk_r():
+    build_step(WALK_R_START, flip=False)
+
+
+def build_walk_l():
+    build_step(WALK_L_START, flip=True)
 
 
 def build_attack():
@@ -379,7 +420,8 @@ def build_bump():
 
 ANIMATIONS = (
     ("idle", IDLE_START, IDLE_END, build_idle),
-    ("walk", WALK_START, WALK_END, build_walk),
+    ("walk_r", WALK_R_START, WALK_R_END, build_walk_r),
+    ("walk_l", WALK_L_START, WALK_L_END, build_walk_l),
     ("attack", ATTACK_START, ATTACK_END, build_attack),
     ("bump", BUMP_START, BUMP_END, build_bump),
 )
