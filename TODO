@@ -6,14 +6,6 @@
   is already loaded (model_keyframe_t.anchors) and player.frog ships 7
   anchors; model.h just exposes nothing. Needed before sword.frog can be
   drawn in the player's hand
-- ModelInstance_PlayAnimationFor(instance, anim, seconds): fit an animation
-  to a duration the game chose, instead of retiming the game to fit the
-  animation. One f32 time scale on the instance, Update multiplies
-  delta_time; the authored length is already
-  keyframes[keyframe_count-1].time_s so no format change. Until it exists,
-  PLAYER_MOVE_SPEED 4.0 and PLAYER_BUMP_SPEED are pinned to the clip
-  lengths (0.250s / 0.375s). Also the mechanism for client fast-forward
-  when the event queue is deep
 - should render pass be tied directly to the pipeline, get rid of pass as parameter to draw-calls
 - console
     - mouse scroll
