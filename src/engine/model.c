@@ -34,6 +34,7 @@ struct _model_instance_t
 
     f32 keyframe_time;  // Time elapsed since keyframe start
     model_animation_t *current_animation;
+    f32 current_playback_speed;
     u16 current_keyframe_idx;
 
     mesh_handle_t anim_from_mesh;
@@ -150,18 +151,24 @@ model_animation_handle_t Model_GetAnimation(model_handle_t model, const char *an
 
 bool ModelInstance_PlayAnimation(model_instance_handle_t instance, model_animation_handle_t animation)
 {
+    return ModelInstance_PlayAnimationS(instance, animation, 1.0f);
+}
+
+bool ModelInstance_PlayAnimationS(model_instance_handle_t instance, model_animation_handle_t animation, f32 playback_speed)
+{
     if (animation->keyframe_count < 2)
         return false;
 
     instance->current_animation = animation;
     instance->current_keyframe_idx = 0;
+    instance->current_playback_speed = playback_speed;
     instance->keyframe_time = 0.0f;
     instance->keyframe_progress = 0.0f;
 
     instance->anim_from_mesh = animation->keyframes[0].mesh;
     instance->anim_to_mesh = animation->keyframes[1].mesh;
 
-    Log(DEBUG, "playing animation %S", animation->name);
+    Log(DEBUG, "playing animation %S (%.2fx)", animation->name, playback_speed);
 
     return true;
 }
@@ -189,7 +196,7 @@ void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time)
     if (anim == MODEL_ANIMATION_INVALID_HANDLE)
         return;
 
-    instance->keyframe_time += delta_time;
+    instance->keyframe_time += (delta_time * instance->current_playback_speed);
 
     f32 duration = anim->keyframes[idx + 1].time_s - anim->keyframes[idx].time_s;
 

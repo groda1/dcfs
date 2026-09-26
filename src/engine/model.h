@@ -45,6 +45,7 @@ void ModelInstance_Draw(model_instance_handle_t instance, renderpass_handle_t pa
 
 
 bool ModelInstance_PlayAnimation(model_instance_handle_t instance, model_animation_handle_t animation);
+bool ModelInstance_PlayAnimationS(model_instance_handle_t instance, model_animation_handle_t animation, f32 playback_speed);
 
 void ModelInstance_Update(model_instance_handle_t instance, f32 delta_time);
 

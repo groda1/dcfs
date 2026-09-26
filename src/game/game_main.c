@@ -661,7 +661,7 @@ static bool player_attempt_move(i32 new_x, i32 new_y)
         game->player_target_pos_y = new_y;
         game->player_anim = PLAYER_ANIM_MOVE;
 
-        ModelInstance_PlayAnimation(game->player_model_instance, game->player_walk_anim);
+        ModelInstance_PlayAnimationS(game->player_model_instance, game->player_walk_anim, 0.5f);
         return true;
     }
 
