@@ -36,7 +36,7 @@ typedef struct
     f32 window_scroll;
 
     i64 line_scroll;
-    u64 line_scroll_updated_at_log_count;
+    u64 line_scroll_updated_at_log_total;
 
 } console_t;
 
@@ -77,18 +77,6 @@ void Console_Update(f32 delta_time)
         scroll -= delta_time * TOGGLE_SPEED;
         s_console.window_scroll = ClampBot(0.0f, scroll);
     }
-
-    if (s_console.active && s_console.line_scroll)
-    {
-        u64 log_count = Log_Count();
-        // If log count has changed we need to adjust the line scroll or else the scroll wont
-        // be fixed in place.
-        if (log_count > s_console.line_scroll_updated_at_log_count)
-        {
-            s_console.line_scroll += log_count - s_console.line_scroll_updated_at_log_count;
-            s_console.line_scroll_updated_at_log_count = log_count;
-        }
-    }
 }
 
 void Console_Draw()
@@ -98,6 +86,21 @@ void Console_Draw()
 
     console_layout_t l = layout();
     u64 log_count = Log_Count();
+
+    if (s_console.active && s_console.line_scroll)
+    {
+        u64 log_total = Log_Total();
+        // If log count has changed we need to adjust the line scroll or else the scroll wont
+        // be fixed in place.
+        if (log_total > s_console.line_scroll_updated_at_log_total)
+        {
+            s_console.line_scroll += log_total - s_console.line_scroll_updated_at_log_total;
+            s_console.line_scroll_updated_at_log_total = log_total;
+        }
+
+        if ((s_console.line_scroll + l.lines) > (i64)log_count)
+            s_console.line_scroll = ClampBot(0, (i64)log_count - l.lines);
+    }
 
     // Draw console bg
     Draw_Quad(0, l.bottom, l.width, l.height, COLOR_BG);
@@ -184,15 +187,14 @@ key_handle_result_t Console_HandleKeyDown(key_code_t key)
                 s_console.line_scroll += SCROLL_LINES;
                 if ((s_console.line_scroll + l.lines) > log_count)
                     s_console.line_scroll = ClampBot(0, log_count - l.lines);
-                s_console.line_scroll_updated_at_log_count = log_count;
+                s_console.line_scroll_updated_at_log_total = Log_Total();
 
                 return KEY_EVENT_CONSUMED;
             }
             case KEY_PGDN:
             {
-                i64 log_count = Log_Count();
                 s_console.line_scroll = ClampBot(0, s_console.line_scroll - SCROLL_LINES);
-                s_console.line_scroll_updated_at_log_count = log_count;
+                s_console.line_scroll_updated_at_log_total = Log_Total();
 
                 return KEY_EVENT_CONSUMED;
             }

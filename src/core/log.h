@@ -31,6 +31,7 @@ typedef struct
     u64 mask;
     u64 head;
     u64 tail;
+    u64 total;
 
 } log_t;
 
@@ -41,6 +42,7 @@ void Log_Destroy(void);
 void Log(log_severity_t severity, const char *log, ...);
 
 u64 Log_Count();
+u64 Log_Total();
 log_entry_t *Log_Get(u64 index);
 
 

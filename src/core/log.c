@@ -4,8 +4,8 @@
 #include "memory_arena.h"
 #include "log.h"
 
-#define LOG_CAPACITY 8192
-#define MAX_ENTRY_LENGTH 256
+#define LOG_CAPACITY        8192
+#define MAX_ENTRY_LENGTH    256
 
 static log_t *s_logger = NULL;
 
@@ -34,6 +34,7 @@ void Log_Init(void)
     l->capacity = LOG_CAPACITY;
     l->head = 0;
     l->tail = 0;
+    l->total = 0;
     l->mask = LOG_CAPACITY - 1;
 
     l->entries = arena_push_array(arena, log_entry_t, LOG_CAPACITY);
@@ -93,11 +94,18 @@ void Log(log_severity_t severity, const char *log, ...)
     s_logger->tail++;
     if (s_logger->tail == s_logger->capacity)
         s_logger->tail = 0;
+
+    s_logger->total++;
 }
 
 u64 Log_Count()
 {
     return (s_logger->tail - s_logger->head) & s_logger->mask;
+}
+
+u64 Log_Total()
+{
+    return s_logger->total;
 }
 
 log_entry_t *Log_Get(u64 index)
