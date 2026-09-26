@@ -179,7 +179,12 @@ static void draw_version_label()
     window_extent_t extent = Renderer_GetWindowExtent();
     Draw_SetTextSize(16);
     Draw_SetTextColor(V4(1.0, 1.0, 1.0, 1.0));
-    Draw_Text(extent.width - 168, extent.height - 32, string_lit("DCFS 0.0.1"));
+#ifdef DEBUG_BUILD
+    string label = string_lit("DCFS [dbg] 0.0.1");
+#else
+    string label = string_lit("DCFS 0.0.1");
+#endif
+    Draw_Text(extent.width - (label.len) * 16 - 8, extent.height - 32, label);
 }
 
 static void draw_stats()
