@@ -6,7 +6,7 @@
 
 typedef enum
 {
-    TILE_NONE,
+    TILE_EMPTY,
     TILE_FLOOR,
     TILE_WALL,
 } tile_type_t;

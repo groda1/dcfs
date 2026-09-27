@@ -638,7 +638,7 @@ static void draw_grid(void)
         for (i32 x = start_x; x < end_x; x++)
         {
             const tile_t *tile = Level_GetTile(&g_client.level, x, y);
-            if (!(tile->flags & FLAG_REVEALED))
+            if (!(tile->flags & FLAG_REVEALED) || tile->type == TILE_EMPTY)
                 continue;
 
             vec3 floor_center = tile_center(x, y);

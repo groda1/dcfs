@@ -2,6 +2,7 @@
 
 #include "array_queue.h"
 #include "level.h"
+#include "level_gen.h"
 #include "log.h"
 #include "memory_arena.h"
 #include "rng.h"
@@ -9,9 +10,6 @@
 
 #define LEVEL_WIDTH             256
 #define LEVEL_HEIGHT            128
-#define LEVEL_WALL_SEGMENTS     300
-#define LEVEL_WALL_MIN_LENGTH   3
-#define LEVEL_WALL_MAX_LENGTH   12
 
 #define OUTBOX_CAPACITY         1024
 
@@ -33,7 +31,6 @@ typedef struct
 
 static server_t g_server;
 
-static void generate_level(void);
 static void reveal_around_player(void);
 static void handle_move(const command_move_t *move);
 static void send(const event_t *event);
@@ -50,10 +47,7 @@ bool Server_Init(u64 seed)
 
     Level_Init(&server->level, server->run_arena, LEVEL_WIDTH, LEVEL_HEIGHT);
 
-    server->player_x = LEVEL_WIDTH / 2;
-    server->player_y = LEVEL_HEIGHT / 2;
-
-    generate_level();
+    LevelGen_Generate(&server->level, &server->rng, &server->player_x, &server->player_y);
 
     event_t init = {
         .type = LEVEL_INIT,
@@ -112,40 +106,6 @@ void Server_HandleCommand(const command_t *command)
 bool Server_PollEvent(event_t *event)
 {
     return ArrayQueue_Pop(&g_server.outbox, event);
-}
-
-static void generate_level(void)
-{
-    server_t *server = &g_server;
-    level_t *level = &server->level;
-
-    for (i32 y = 0; y < level->height; y++)
-    {
-        for (i32 x = 0; x < level->width; x++)
-        {
-            bool border = x == 0 || y == 0 || x == level->width - 1 || y == level->height - 1;
-            Level_GetTile(level, x, y)->type = border ? TILE_WALL : TILE_FLOOR;
-        }
-    }
-
-    for (i32 i = 0; i < LEVEL_WALL_SEGMENTS; i++)
-    {
-        i32 x = Rng_Range(&server->rng, 1, level->width - 1);
-        i32 y = Rng_Range(&server->rng, 1, level->height - 1);
-        i32 length = Rng_Range(&server->rng, LEVEL_WALL_MIN_LENGTH, LEVEL_WALL_MAX_LENGTH + 1);
-        bool horizontal = Rng_Range(&server->rng, 0, 2);
-
-        for (i32 j = 0; j < length && Level_InBounds(level, x, y); j++)
-        {
-            Level_GetTile(level, x, y)->type = TILE_WALL;
-            if (horizontal)
-                x++;
-            else
-                y++;
-        }
-    }
-
-    Level_GetTile(level, server->player_x, server->player_y)->type = TILE_FLOOR;
 }
 
 static void reveal_around_player(void)

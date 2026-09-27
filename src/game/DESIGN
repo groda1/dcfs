@@ -715,9 +715,25 @@ differ):
     run_arena is created at init and never cleared, and LEVEL_INIT just
     allocates another level in it. Clearing it needs a "new run" signal,
     which doesn't exist yet.
-  - Level gen: 256x128, border wall, random short wall segments, start
-    tile forced clear. Placeholder. The seed comes from the clock and is
-    logged. RNG is xorshift64* in core/rng.c.
+  - Level gen (server/level_gen.c): NetHack-style. Three tile types
+    only: TILE_EMPTY (nothing, not drawn), TILE_FLOOR, TILE_WALL.
+    Rectangular rooms (up to 25x13). Separate rooms may share a wall,
+    and a placement that overlaps exactly one room is sometimes kept,
+    merging them into an irregular room. Rooms are joined by a minimum
+    spanning tree over their center distances, so corridors stay short,
+    plus some extra joins to the nearest unjoined room for loops. Each
+    join is an L-shaped floor corridor. Corridors are ALWAYS 1 wide
+    (decided), guaranteed by an odd grid: room interiors start and end
+    on odd coordinates, and every corridor leg runs along an odd row or
+    column. Two parallel corridors, or a corridor alongside a room, are
+    therefore always at least 2 apart, with a wall between. Keep this
+    invariant when editing the generator. Then every empty tile touching floor
+    (8-neighbourhood) becomes wall. That walls rooms and corridors alike,
+    and a doorway is simply the floor gap where a corridor crosses a
+    room wall. No separate corridor or door tile types (decided: keep
+    it simple). The player starts on a random odd tile in a random room. The seed
+    comes from the clock and is logged. RNG is xorshift64* in
+    core/rng.c.
 
 
 MILESTONE 3 (agreed): monster, FOV, fog of war
