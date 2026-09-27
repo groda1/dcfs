@@ -212,8 +212,16 @@ feel before the client/server split; it dissolves into client/ when
 milestone 2 starts.
 
 
-MILESTONE 1 (next): animated models and weapon anchoring
---------------------------------------------------------
+MILESTONE 1 (done, anchoring deferred): animated models and weapon anchoring
+-----------------------------------------------------------------------------
+
+Declared done 2026-09-27. Built: the .frog loader, the two-buffer morph
+path, the Blender export script, the segmented human with idle / walk_r /
+walk_l / attack / bump, and per-instance playback speed. DEFERRED: the
+runtime half of anchoring. Anchor names and per-keyframe transforms are
+exported and loaded, but nothing interpolates them yet and no weapon is
+drawn in the hand. The design below still stands; pick it up when
+equipment first needs to be visible.
 
 The grid sandbox's player cube becomes an animated human model holding
 a weapon. Work: the .frog loader, the two-buffer morph-animation path
@@ -610,8 +618,8 @@ far from it and the motion reads wrong. The API exists so a gameplay retune
 does not force a re-export, not so one clip can cover 0.1 s and 1.0 s.
 
 
-MILESTONE 2 (agreed): one room, walking cube
---------------------------------------------
+MILESTONE 2 (next): one room, walking cube
+------------------------------------------
 
 Protocol message structs + the local message pump + a server that
 generates one room and resolves moves + the client walking a cube
@@ -646,6 +654,70 @@ dy} } }; event_t { type, union { snapshot { extents, terrain cells,
 entities, player id }, entity_moved { id, from, to, caused_by_seq },
 command_rejected { sequence, reason } } }. Fixed-cap inline arrays
 per the struct rules. Terrain/entity ids in protocol.h.
+
+First cut, decided 2026-09-27 (supersedes the sketch above where they
+differ):
+
+  - Directory is common/, not protocol/. Libraries: common_lib (core),
+    server_lib (core + common), client_lib (core, platform, engine,
+    common), game_lib = game_main.c only. The client getting its own
+    lib means it cannot include server headers either.
+  - Commands and events are separate types (revised the same day; a
+    single shared event_t was tried first). command_t is client ->
+    server: player intent, and every command advances the game one
+    turn. event_t is server -> client: facts. The server's entry point
+    is Server_HandleCommand, so it cannot be handed an event.
+  - Commands carry a sequence number. COMMAND_MOVE is a direction
+    {dx, dy}, not a target position. Intent is "step east", so the
+    client cannot even express a teleport.
+  - Turn boundary: the server finishes EVERY command with TURN_DONE
+    {sequence}, whether the command was accepted or refused. Everything
+    between the command and its TURN_DONE is that turn's result
+    (later: monsters acting too). A refused command has no special
+    event: it just produces no PLAYER_MOVED before its TURN_DONE. This
+    also answers part of the open question on grouping events into
+    world turns.
+  - Shared tile_t { type, flags } and level_t in common/level.h. On the
+    server FLAG_REVEALED means "already sent to the player" (its map
+    memory, single player for now). On the client it means "known,
+    draw it". TILE_REVEAL carries only the terrain type; server flags
+    never cross the wire.
+  - Startup: the server sends LEVEL_INIT (extents only), PLAYER_MOVED
+    (initial placement), then TILE_REVEAL for the square of
+    REVEAL_RADIUS around the player (placeholder for FOV), and finally
+    RUN_START. RUN_START closes the initial burst: the client's single
+    run_active flag is set there, so run_active always implies the level
+    and the player exist. Nothing is drawn and no input is taken before
+    it. Separate "is the level ready" / "is the player placed" flags
+    were tried and rejected. After each
+    move it reveals the square again and sends ONLY tiles not already
+    revealed.
+  - PLAYER_MOVED is a fact, "the player is now at x,y", used for
+    placement and movement alike.
+  - Client prediction is an overlay, as the prediction section
+    requires. server_player_x/y is the confirmed position and only
+    ever comes from PLAYER_MOVED. player_pos_x/y is what is displayed
+    and predicted. A move into a known non-walkable tile is a
+    client-only bump: nothing is sent and no turn is spent. Any other
+    move is predicted (walk starts instantly) and sent. On the TURN_DONE
+    for the pending sequence the client compares its prediction with
+    the confirmed position; a mismatch hard-snaps the display to it.
+    A PLAYER_MOVED with nothing pending (the world moved you) snaps
+    directly.
+  - Later: TILE_REVEAL is one event per tile. Real FOV will want a
+    batched reveal, since a room's worth of single events is chatty and
+    would fill the 256-entry queue.
+  - Rules_IsWalkable in common/rules.c is the shared predicate.
+  - Memory lifetime: everything that lives as long as the current game
+    ("the run": floors, the player, ...) goes in a run_arena, one on
+    each side. Client and server each also keep a long-lived arena for
+    things that outlive a run. For now a run is the whole process: each
+    run_arena is created at init and never cleared, and LEVEL_INIT just
+    allocates another level in it. Clearing it needs a "new run" signal,
+    which doesn't exist yet.
+  - Level gen: 256x128, border wall, random short wall segments, start
+    tile forced clear. Placeholder. The seed comes from the clock and is
+    logged. RNG is xorshift64* in core/rng.c.
 
 
 MILESTONE 3 (agreed): monster, FOV, fog of war
@@ -684,5 +756,4 @@ OPEN QUESTIONS
 - Persistence: save games are server-side state dumps. Format can wait
   until there is state worth saving.
 
-- Directory name bikeshed: protocol/ vs common/. Using protocol/ until
-  someone objects.
+- Directory name: settled on common/ (see milestone 2).

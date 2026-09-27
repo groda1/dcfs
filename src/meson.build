@@ -17,6 +17,9 @@ engine_inc = include_directories('engine')
 # engine-private headers; not visible to game_lib
 engine_internal_inc = include_directories('engine/internal')
 game_inc = include_directories('game')
+common_inc = include_directories('game/common')
+server_inc = include_directories('game/server')
+client_inc = include_directories('game/client')
 stb_inc = include_directories('third_party/stb')
 
 vulkan_dep = dependency('vulkan')
@@ -47,12 +50,26 @@ engine_lib = static_library('engine', engine_sources,
     dependencies : [vulkan_dep],
 )
 
+common_lib = static_library('common', common_sources,
+    include_directories : [core_inc, common_inc],
+)
+
+# the server never sees engine, renderer or platform headers
+server_lib = static_library('server', server_sources,
+    include_directories : [core_inc, common_inc, server_inc],
+)
+
 # no vulkan_dep: the game never sees vulkan types or headers
-game_lib = static_library('game', game_sources,
-    include_directories : [core_inc, platform_inc, engine_inc, game_inc],
+client_lib = static_library('client', client_sources,
+    include_directories : [core_inc, platform_inc, engine_inc, common_inc, client_inc],
     dependencies : [m_dep],
 )
 
-dcfs_libs = [core_lib, platform_lib, vulkan_lib, engine_lib, game_lib]
+game_lib = static_library('game', game_sources,
+    include_directories : [core_inc, platform_inc, engine_inc, game_inc, common_inc, server_inc, client_inc],
+    dependencies : [m_dep],
+)
+
+dcfs_libs = [core_lib, platform_lib, vulkan_lib, engine_lib, common_lib, server_lib, client_lib, game_lib]
 
 sources += files('main.c')

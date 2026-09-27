@@ -5,7 +5,8 @@ core_sources += files(
     'memory_arena.c',
     'core_string.c',
     'file.c',
-    'log.c'
+    'log.c',
+    'rng.c',
 )
 
 if host_machine.system() == 'linux'
