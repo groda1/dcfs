@@ -25,10 +25,10 @@
 #define RENDER_WIDTH                (640 * 1)
 #define RENDER_HEIGHT               (360 * 1)
 
-#define FOG_BRIGHTNESS              0.35f
-#define FOG_DESATURATION            0.7f
+#define FOG_BRIGHTNESS              0.25f
+#define FOG_DESATURATION            0.8f
 #define FOG_TEAR_DEPTH              0.25f
-#define FOG_EDGE_SOFTNESS           0.06f
+#define FOG_EDGE_SOFTNESS           0.12f
 #define FOG_PREVIOUSLY_KNOWN_BIT    9
 #define FOG_VOID_SHIFT              10
 #define FOG_RADIAL_SWEEP_RADIUS     (FOV_RADIUS + 1.5f)
