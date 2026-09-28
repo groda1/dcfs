@@ -2,7 +2,6 @@
 #include "rules.h"
 
 static bool line_clear(const level_t *level, i32 x0, i32 y0, i32 x1, i32 y1);
-static bool touches_visible_open_tile(const level_t *level, i32 x, i32 y);
 
 void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius)
 {
@@ -39,13 +38,13 @@ void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius)
             if ((tile->flags & FLAG_VISIBLE) || !Rules_BlocksSight(level, x, y))
                 continue;
 
-            if (touches_visible_open_tile(level, x, y))
+            if (Fov_TouchesVisibleOpenTile(level, x, y))
                 tile->flags |= FLAG_VISIBLE;
         }
     }
 }
 
-static bool touches_visible_open_tile(const level_t *level, i32 x, i32 y)
+bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
 {
     for (i32 ny = y - 1; ny <= y + 1; ny++)
     {

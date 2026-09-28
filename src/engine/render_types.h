@@ -18,12 +18,38 @@
 #define MAX_VERTEX_ATTRIBUTES 8
 #define MAX_VERTEX_BINDINGS   3
 #define MAX_UNIFORM_BINDINGS  4
+#define MAX_RENDERPASS_TARGETS 4
 
 typedef u32 renderpass_handle_t;
 typedef u32 pipeline_handle_t;
 typedef u32 buffer_object_handle_t;
 typedef u32 texture_handle_t;
 typedef u32 sampler_handle_t;
+
+typedef enum
+{
+    RENDER_TEXTURE_FORMAT_SRGB,
+    RENDER_TEXTURE_FORMAT_UNORM,
+} render_texture_format_t;
+
+typedef enum
+{
+    RENDER_TARGET_CLEAR,
+    RENDER_TARGET_LOAD,
+} render_target_load_t;
+
+typedef struct
+{
+    texture_handle_t texture;
+    render_target_load_t load;
+} render_target_config_t;
+
+typedef struct
+{
+    u32 order;
+    u32 target_count;
+    render_target_config_t targets[MAX_RENDERPASS_TARGETS];
+} renderpass_config_t;
 
 typedef struct
 {
@@ -100,6 +126,8 @@ struct _pipeline_config_t
 
     u32 uniform_binding_count;
     uniform_binding_t uniform_bindings[MAX_UNIFORM_BINDINGS];
+
+    u32 color_output_count;
 
     bool alpha_blending;
     bool disable_depth_test;

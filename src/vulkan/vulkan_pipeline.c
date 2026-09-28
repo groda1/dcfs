@@ -20,11 +20,21 @@ static bool create_descriptor_sets(const pipeline_config_t *config, pipeline_t *
 static bool validate_vertex_inputs(const pipeline_config_t *config, u32 stream_count);
 #endif
 
-bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
-                           const pipeline_config_t *config, pipeline_t *pipeline_out)
+bool VulkanPipeline_Create(const VkFormat *color_formats, u32 color_format_count,
+                           VkFormat depth_format, const pipeline_config_t *config,
+                           pipeline_t *pipeline_out)
 {
     const vertex_layout_t *vertex_layout = config->vertex_layout;
     u32 stream_count = Max(config->vertex_streams, 1u);
+    u32 output_count = Max(config->color_output_count, 1u);
+
+    Assert(color_format_count >= 1 && color_format_count <= MAX_RENDERPASS_TARGETS);
+    if (output_count > color_format_count)
+    {
+        Log(ERROR, "pipeline '%s' writes %u color outputs but its pass has %u targets",
+            config->name, output_count, color_format_count);
+        return false;
+    }
 
     Assert(vertex_layout != NULL);
     Assert(vertex_layout->attribute_count <= MAX_VERTEX_ATTRIBUTES);
@@ -149,25 +159,29 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
         .depthCompareOp = VK_COMPARE_OP_LESS,
     };
 
-    VkPipelineColorBlendAttachmentState color_blend_attachment = {
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-            | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-    };
-    if (config->alpha_blending)
+    VkPipelineColorBlendAttachmentState color_blend_attachments[MAX_RENDERPASS_TARGETS] = {};
+    for (u32 i = 0; i < output_count; i++)
     {
-        color_blend_attachment.blendEnable = true;
-        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        VkPipelineColorBlendAttachmentState *attachment = &color_blend_attachments[i];
+        attachment->colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+            | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+        if (config->alpha_blending)
+        {
+            attachment->blendEnable = true;
+            attachment->srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            attachment->dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            attachment->colorBlendOp = VK_BLEND_OP_ADD;
+            attachment->srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            attachment->dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            attachment->alphaBlendOp = VK_BLEND_OP_ADD;
+        }
     }
 
     VkPipelineColorBlendStateCreateInfo color_blend_state = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend_attachment,
+        .attachmentCount = color_format_count,
+        .pAttachments = color_blend_attachments,
     };
 
     VkPushConstantRange push_constant_range = {
@@ -201,8 +215,8 @@ bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
        render pass object */
     VkPipelineRenderingCreateInfo rendering_create_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &color_format,
+        .colorAttachmentCount = color_format_count,
+        .pColorAttachmentFormats = color_formats,
         .depthAttachmentFormat = depth_format,
     };
 

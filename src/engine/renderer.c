@@ -78,14 +78,19 @@ sampler_handle_t Renderer_CreateSampler(void)
     return VulkanTexture_CreateSampler();
 }
 
-texture_handle_t Renderer_CreateRenderTexture(u32 width, u32 height, sampler_handle_t sampler)
+texture_handle_t Renderer_CreateRenderTexture(u32 width, u32 height,
+                                              render_texture_format_t format,
+                                              sampler_handle_t sampler)
 {
-    return VulkanTexture_CreateRenderTarget(width, height, sampler);
+    VkFormat vk_format = format == RENDER_TEXTURE_FORMAT_UNORM ? VK_FORMAT_R8G8B8A8_UNORM
+                                                               : VK_FORMAT_R8G8B8A8_SRGB;
+
+    return VulkanTexture_CreateRenderTarget(width, height, vk_format, sampler);
 }
 
-renderpass_handle_t Renderer_CreateRenderPass(texture_handle_t target_texture, u32 pass_order)
+renderpass_handle_t Renderer_CreateRenderPass(const renderpass_config_t *config)
 {
-    return VulkanPass_CreateImagePass(target_texture, pass_order);
+    return VulkanPass_CreateImagePass(config);
 }
 
 window_extent_t Renderer_GetWindowExtent(void)

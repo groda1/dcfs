@@ -162,16 +162,17 @@ texture_handle_t VulkanTexture_Create(u32 width, u32 height, const u8 *rgba_data
     return register_texture(&texture, layout, sampler);
 }
 
-texture_handle_t VulkanTexture_CreateRenderTarget(u32 width, u32 height, sampler_handle_t sampler)
+texture_handle_t VulkanTexture_CreateRenderTarget(u32 width, u32 height, VkFormat format,
+                                                  sampler_handle_t sampler)
 {
     texture_t texture = {
         .width = width,
         .height = height,
-        .format = VK_FORMAT_R8G8B8A8_SRGB,
+        .format = format,
     };
 
     VkImageLayout layout;
-    if (!VulkanImage_CreateColorAttachment(width, height, &texture.image,
+    if (!VulkanImage_CreateColorAttachment(width, height, format, &texture.image,
                                            &texture.image_memory, &layout))
     {
         Log(ERROR, "failed to create render target image");

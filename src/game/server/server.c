@@ -14,6 +14,8 @@
 
 #define OUTBOX_CAPACITY         1024
 
+#define REVEAL_RADIUS           (FOV_RADIUS + 1)
+
 typedef struct
 {
     arena_t *arena;
@@ -114,15 +116,18 @@ static void reveal_visible(void)
 
     Fov_Compute(level, server->player_x, server->player_y, FOV_RADIUS);
 
-    for (i32 y = server->player_y - FOV_RADIUS; y <= server->player_y + FOV_RADIUS; y++)
+    for (i32 y = server->player_y - REVEAL_RADIUS; y <= server->player_y + REVEAL_RADIUS; y++)
     {
-        for (i32 x = server->player_x - FOV_RADIUS; x <= server->player_x + FOV_RADIUS; x++)
+        for (i32 x = server->player_x - REVEAL_RADIUS; x <= server->player_x + REVEAL_RADIUS; x++)
         {
             if (!Level_InBounds(level, x, y))
                 continue;
 
             tile_t *tile = Level_GetTile(level, x, y);
-            if (!(tile->flags & FLAG_VISIBLE) || (tile->flags & FLAG_REVEALED))
+            if (tile->flags & FLAG_REVEALED)
+                continue;
+
+            if (!(tile->flags & FLAG_VISIBLE) && !Fov_TouchesVisibleOpenTile(level, x, y))
                 continue;
 
             tile->flags |= FLAG_REVEALED;

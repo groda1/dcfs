@@ -128,12 +128,12 @@ exit:
     return result;
 }
 
-bool VulkanImage_CreateColorAttachment(u32 width, u32 height, VkImage *image_out, VkDeviceMemory *image_memory_out, VkImageLayout *layout_out)
+bool VulkanImage_CreateColorAttachment(u32 width, u32 height, VkFormat format, VkImage *image_out, VkDeviceMemory *image_memory_out, VkImageLayout *layout_out)
 {
     Assert(width > 0 && height > 0);
 
     if (!create_image((VkExtent2D){width, height}, 1, VK_SAMPLE_COUNT_1_BIT,
-                      VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                      format, VK_IMAGE_TILING_OPTIMAL,
                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image_out, image_memory_out))
         return false;

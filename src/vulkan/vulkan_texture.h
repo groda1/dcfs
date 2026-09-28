@@ -17,7 +17,7 @@ texture_handle_t VulkanTexture_Create(u32 width, u32 height, const u8 *rgba_data
                                       sampler_handle_t sampler);
 
 /* a texture an image pass renders into; sampled like any other texture */
-texture_handle_t VulkanTexture_CreateRenderTarget(u32 width, u32 height,
+texture_handle_t VulkanTexture_CreateRenderTarget(u32 width, u32 height, VkFormat format,
                                                   sampler_handle_t sampler);
 
 sampler_handle_t VulkanTexture_CreateSampler();

@@ -22,8 +22,9 @@ struct _pipeline_t
     VkDescriptorSet         descriptor_sets[MAX_FRAMES_IN_FLIGHT];
 };
 
-bool VulkanPipeline_Create(VkFormat color_format, VkFormat depth_format,
-                           const pipeline_config_t *config, pipeline_t *pipeline_out);
+bool VulkanPipeline_Create(const VkFormat *color_formats, u32 color_format_count,
+                           VkFormat depth_format, const pipeline_config_t *config,
+                           pipeline_t *pipeline_out);
 void VulkanPipeline_Destroy(pipeline_t *pipeline);
 
 #endif

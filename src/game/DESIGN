@@ -702,11 +702,22 @@ differ):
     visible open tile visible too. Without it, a wall the player stands
     next to is partly dark, because lines nearly parallel to it clip the
     adjacent wall tile.
+  - Reveal margin (decided): the server reveals every visible tile PLUS
+    every tile touching a visible OPEN (non-sight-blocking) tile, via
+    Fov_TouchesVisibleOpenTile, shared with FOV's wall pass. That way
+    every lit edge (view rim, shadow edges around corners, doorways) has
+    fog next to it for the torn edge to tear into, instead of black.
+    Neighbours of visible WALLS are deliberately excluded: those are the
+    far side of the wall, and with our camera they would show as fog
+    floor behind every wall, leaking the next room's layout. First tried,
+    and rejected by the user: FOV at radius + 1. It still left black,
+    edgeless tiles at every shadow edge. Accepted cost: one tile of
+    terrain around corners and past doorways is revealed without being
+    seen.
   - The server runs FOV on the true map and is the authority on what
     gets revealed. The client runs the SAME function on its own known
-    map, purely to split revealed tiles into "visible now" (normal
-    colors) and "remembered" (fog: desaturated 70% towards grey, then
-    35% brightness). The client recomputes lazily (fov_dirty), set ONLY
+    map, purely to split revealed tiles into "visible now" and
+    "remembered" (drawn in fog, see "Rendering: fog of war" below). The client recomputes lazily (fov_dirty), set ONLY
     where FOV inputs change: its known map (LEVEL_INIT, TILE_REVEAL) or
     its position (a predicted move, or any snap to a server position).
     Events that change neither must not set it. It computes from its
@@ -757,6 +768,117 @@ differ):
     it simple). The player starts on a random odd tile in a random room. The seed
     comes from the clock and is logged. RNG is xorshift64* in
     core/rng.c.
+
+
+DECIDED: rendering at a fixed low resolution
+--------------------------------------------
+
+The world renders into a static 640x360 target, never the window size,
+for the 90s look. The swapchain pass integer-scales it to fit the
+window (at least 1x) and centers it. 640x360 scales exactly to 720p
+(x2), 1080p (x3), 1440p (x4) and 4K (x6). The camera aspect is the
+target's, not the window's. Render targets therefore never resize with
+the window, and the engine needs no resize path for them. Engine UI
+(console, labels) is still drawn at window resolution in the swapchain
+pass, after the scene.
+
+
+DECIDED: rendering: fog of war
+------------------------------
+
+Three passes:
+  1. fog mask (image pass, order 0): the tile geometry, into
+     a UNORM 640x360 target (a linear format, because the values are
+     data, not color). Each tile instance carries its tile coordinate and
+     9 visibility bits: its own FLAG_VISIBLE and those of its 8
+     neighbours. The shader writes 1 for visible tiles. For fogged tiles
+     it computes the distance from the fragment to the nearest visible
+     neighbour tile, and compares that against a world-anchored noise
+     threshold (3D value noise on world position, so the pattern doesn't
+     swim with the camera and wall faces tear too). The result is a torn
+     edge that always lies INSIDE the first fogged tiles, never eating
+     into the lit area. Visibility stays binary; the tear is purely
+     rendering. Tiles next to VOID (neighbour unrevealed,
+     TILE_EMPTY or off the map) get a second, independent torn edge on
+     that side. It tears "known" to 0 (black) from the void side, using
+     noise at an offset so the two edges don't mirror each other. So a
+     fog tile between the lit area and the void has two torn edges. The
+     void tear applies to EVERY tile, lit ones included (e.g. a visible
+     wall with nothing known behind it gets a torn outer edge), so it
+     doesn't depend on visibility at all. During a step, only the tear
+     from neighbours that just got revealed shrinks away, with (1 - t). Instance bits:
+     visibility = [0..8] visible now, [10..18] void now; previous =
+     [0..8] visible before, 9 known before, [10..18] void before.
+  2. scene (image pass, order 1, TWO targets): the sRGB 640x360 scene
+     color (cleared), plus the fog mask LOADED from pass 1. Tile
+     pipelines write only the color target. Entities write both, i.e.
+     color plus a solid mask of lit = 1 and known = 1, in the same draw
+     (color_output_count = 2).
+  3. post (swapchain pass): a fullscreen quad blends the scene color
+     towards the fog look by the mask. The fog look is desaturation
+     then darkening, FOG_DESATURATION / FOG_BRIGHTNESS.
+
+The edge is hard or soft by ONE knob, FOG_EDGE_SOFTNESS (in tiles). At
+0 it is a hard torn line; above 0 it fades over that width past the
+tear. Keep the hard option working: it's undecided which one we want.
+FOG_TEAR_DEPTH sets how far into the first fog tile the tear can reach.
+Invariant: the CENTER of every fogged tile is always fully fogged, so a
+fogged tile can never read as "maybe in view". The nearest a visible
+neighbour gets to a tile center is 0.5 tiles (an edge neighbour), so the
+tear's total reach (depth + softness) must stay below that. The shader
+enforces it with MAX_TEAR_REACH 0.45, clamping softness first and then
+depth. Without the cap, a fogged tile with lit neighbours on two or more
+sides was eaten from every side and looked almost lit.
+
+Movement transitions (decided: directional sweep). Visibility changes the
+moment a move is predicted, but the mask animates the change over the
+walk, so the fog edge moves with the player instead of snapping:
+  - The client snapshots all tile flags when it predicts a move
+    (previous_flags, run arena), before any new reveals arrive. The
+    progress t is the walk animation's progress. Standing still, bumps
+    and snaps give t = 1, i.e. no transition.
+  - Each mask instance carries the previous 9 visibility bits too, plus
+    bit 9 = "was already revealed".
+  - Tile coming into view: torn open from the previously visible side, with
+    the tear threshold growing by t * 1.5 tiles.
+    Tile leaving view: closed towards the still-visible side, the reverse.
+    Fogged before and after: the tear from neighbours that stayed visible
+    is untouched, the tear from lost neighbours shrinks with (1 - t), and
+    the tear from new ones grows with t. So unchanged edges never flicker.
+  - No neighbour to sweep from or towards (a corridor seen or lost
+    through a doorway, far from the rest of the view): noise dissolve
+    instead. That shows as brief speckles early in the step.
+  - Newly revealed tiles that are NOT visible (the reveal-margin ring)
+    dissolve from black to fog over the step. There's no directional
+    info for them.
+  - Mask green channel = "known". Tiles revealed for the first time open
+    out of black with the same sweep instead of popping in. The post pass
+    multiplies by it. Undrawn (unknown) tiles are 0, i.e. black.
+Limit: the shader only sees each tile's 3x3 neighbourhood, so a sweep
+covers one tile of travel. Anything further is the dissolve fallback.
+
+Why tiles get a separate mask pass while entities write the mask from
+the scene pass: tile pipelines stay unaware of fog, and the torn-edge
+logic lives in one shader. The cost is that tile mask silhouettes only
+match while the mask geometry matches the real geometry. Revisit if
+props or unusual tile meshes ever show mismatched fog edges.
+
+Entities (the player now, monsters later) must stamp a solid mask,
+never trust the tile behind them. In a low close-up view the player
+hides distant fogged tiles and would pick up their fog. They do it as a
+second color output from the scene pass, not a second draw (decided: a
+model is drawn exactly once). Because the stamp happens in the scene pass,
+it uses the scene's depth buffer, so an entity hidden behind a wall
+doesn't punch through the fog. Monsters are only drawn when visible, so
+solid is always right for them.
+
+Engine support this needed: a render pass takes up to
+MAX_RENDERPASS_TARGETS (4) targets of equal size, each CLEAR or LOAD. A
+LOAD target must have been rendered by an earlier pass that frame; it
+is expected in SHADER_READ_ONLY. A pipeline writes the first
+color_output_count targets of its pass (default 1); the rest are
+write-masked. The mixed write masks need the independentBlend device
+feature, which is now enabled.
 
 
 MILESTONE 3 (agreed): monster, FOV, fog of war

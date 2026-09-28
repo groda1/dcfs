@@ -33,8 +33,9 @@ typedef struct _image_target_t image_target_t;
 struct _image_target_t
 {
     /* borrowed from the texture registry; destroyed with the texture */
-    VkImage         color_image;
-    VkImageView     color_image_view;
+    VkImage         color_images[MAX_RENDERPASS_TARGETS];
+    VkImageView     color_image_views[MAX_RENDERPASS_TARGETS];
+    bool            color_loads[MAX_RENDERPASS_TARGETS];
 
     VkImage         depth_image;
     VkImageView     depth_image_view;
@@ -66,7 +67,8 @@ struct _render_pass
     u32             order;
     VkExtent2D      extent;
     render_target_t target;
-    VkFormat        color_format;
+    VkFormat        color_formats[MAX_RENDERPASS_TARGETS];
+    u32             color_count;
 
     pipeline_t      pipelines[MAX_PIPELINES_PER_PASS];
     u64             pipeline_count;
@@ -144,7 +146,8 @@ bool VulkanPass_CreateSwapchainPass(swapchain_t *swapchain)
         return false;
 
     pass->handle = SWAPCHAIN_PASS_HANDLE;
-    pass->color_format = swapchain->format;
+    pass->color_formats[0] = swapchain->format;
+    pass->color_count = 1;
     pass->extent = swapchain->extent;
     pass->active = true;
 
@@ -155,8 +158,7 @@ bool VulkanPass_CreateSwapchainPass(swapchain_t *swapchain)
     return true;
 }
 
-renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
-                                               u32 order)
+renderpass_handle_t VulkanPass_CreateImagePass(const renderpass_config_t *config)
 {
     if (s_passes.image_pass_count >= MAX_IMAGE_PASSES)
     {
@@ -164,15 +166,40 @@ renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
         return RENDERPASS_HANDLE_INVALID;
     }
 
+    if (config->target_count == 0 || config->target_count > MAX_RENDERPASS_TARGETS)
+    {
+        Log(ERROR, "image pass needs 1..%u targets, got %u", MAX_RENDERPASS_TARGETS,
+            config->target_count);
+        return RENDERPASS_HANDLE_INVALID;
+    }
+
+    u32 order = config->order;
+    VkExtent2D extent = VulkanTexture_GetExtent(config->targets[0].texture);
+
     render_pass_t *pass = &s_passes.image_passes[s_passes.image_pass_count];
     MemoryZeroItem(pass);
     pass->target.type = IMAGE_TARGET;
 
     image_target_t *target = &pass->target.image_target;
-    target->color_image = VulkanTexture_GetImage(target_texture);
-    target->color_image_view = VulkanTexture_GetImageView(target_texture);
+    for (u32 i = 0; i < config->target_count; i++)
+    {
+        texture_handle_t texture = config->targets[i].texture;
 
-    VkExtent2D extent = VulkanTexture_GetExtent(target_texture);
+        VkExtent2D target_extent = VulkanTexture_GetExtent(texture);
+        if (target_extent.width != extent.width || target_extent.height != extent.height)
+        {
+            Log(ERROR, "image pass targets must share one size: target %u is %ux%u, not %ux%u",
+                i, target_extent.width, target_extent.height, extent.width, extent.height);
+            return RENDERPASS_HANDLE_INVALID;
+        }
+
+        target->color_images[i] = VulkanTexture_GetImage(texture);
+        target->color_image_views[i] = VulkanTexture_GetImageView(texture);
+        target->color_loads[i] = config->targets[i].load == RENDER_TARGET_LOAD;
+        pass->color_formats[i] = VulkanTexture_GetFormat(texture);
+    }
+    pass->color_count = config->target_count;
+
     if (!VulkanImage_CreateDepthResources(extent, s_passes.depth_format, &target->depth_image,
                                           &target->depth_image_view,
                                           &target->depth_image_memory))
@@ -183,7 +210,6 @@ renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
 
     pass->handle = (renderpass_handle_t)(s_passes.image_pass_count + 1); /* 1-based */
     pass->order = order;
-    pass->color_format = VulkanTexture_GetFormat(target_texture);
     pass->extent = extent;
     pass->active = true;
 
@@ -199,8 +225,8 @@ renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
 
     s_passes.image_pass_count++;
 
-    Log(INFO, "Created image pass %u [%ux%u] order %u", pass->handle, extent.width,
-        extent.height, order);
+    Log(INFO, "Created image pass %u [%ux%u] order %u targets %u", pass->handle, extent.width,
+        extent.height, order, pass->color_count);
 
     return pass->handle;
 }
@@ -267,7 +293,8 @@ pipeline_handle_t VulkanPass_AddPipeline(renderpass_handle_t pass_handle,
     }
 
     pipeline_t *pipeline = &pass->pipelines[pass->pipeline_count];
-    if (!VulkanPipeline_Create(pass->color_format, s_passes.depth_format, config, pipeline))
+    if (!VulkanPipeline_Create(pass->color_formats, pass->color_count, s_passes.depth_format,
+                               config, pipeline))
         return PIPELINE_HANDLE_INVALID;
 
     pass->pipeline_count++;
@@ -396,58 +423,69 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
 
     bool image_target = pass->target.type == IMAGE_TARGET;
 
-    VkImage color_image = VK_NULL_HANDLE;
-    VkImageView color_image_view = VK_NULL_HANDLE;
+    u32 color_count = pass->color_count;
+    VkImage color_images[MAX_RENDERPASS_TARGETS] = {};
+    VkImageView color_image_views[MAX_RENDERPASS_TARGETS] = {};
+    bool color_loads[MAX_RENDERPASS_TARGETS] = {};
     VkImage depth_image = VK_NULL_HANDLE;
     VkImageView depth_image_view = VK_NULL_HANDLE;
     switch (pass->target.type)
     {
     case SWAPCHAIN_TARGET:
-        color_image = pass->target.swapchain_target.color_images[image_index];
-        color_image_view = pass->target.swapchain_target.color_image_views[image_index];
+        color_images[0] = pass->target.swapchain_target.color_images[image_index];
+        color_image_views[0] = pass->target.swapchain_target.color_image_views[image_index];
         depth_image = pass->target.swapchain_target.depth_image;
         depth_image_view = pass->target.swapchain_target.depth_image_view;
         break;
     case IMAGE_TARGET:
-        color_image = pass->target.image_target.color_image;
-        color_image_view = pass->target.image_target.color_image_view;
+        for (u32 i = 0; i < color_count; i++)
+        {
+            color_images[i] = pass->target.image_target.color_images[i];
+            color_image_views[i] = pass->target.image_target.color_image_views[i];
+            color_loads[i] = pass->target.image_target.color_loads[i];
+        }
         depth_image = pass->target.image_target.depth_image;
         depth_image_view = pass->target.image_target.depth_image_view;
         break;
     }
 
-    /* an image target may still be sampled by a previous frame's draws */
-    VkImageMemoryBarrier attachment_barriers[] = {
-        {
+    /* an image target may still be sampled by a previous frame's draws; a
+       loaded target keeps what an earlier pass left in SHADER_READ_ONLY */
+    VkImageMemoryBarrier attachment_barriers[MAX_RENDERPASS_TARGETS + 1];
+    for (u32 i = 0; i < color_count; i++)
+    {
+        attachment_barriers[i] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = image_target ? VK_ACCESS_SHADER_READ_BIT : 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                | (color_loads[i] ? VK_ACCESS_COLOR_ATTACHMENT_READ_BIT : 0),
+            .oldLayout = color_loads[i] ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                        : VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = color_image,
+            .image = color_images[i],
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .levelCount = 1,
                 .layerCount = 1,
             },
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-                | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = depth_image,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
+        };
+    }
+    attachment_barriers[color_count] = (VkImageMemoryBarrier){
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = depth_image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
         },
     };
 
@@ -460,20 +498,24 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
                              | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
                              | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
                          0, 0, NULL, 0, NULL,
-                         ArrayCount(attachment_barriers), attachment_barriers);
+                         color_count + 1, attachment_barriers);
 
     /* image targets clear to transparent black so they composite when drawn
        with alpha blending */
-    VkRenderingAttachmentInfo color_attachment = {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = color_image_view,
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = image_target
-            ? (VkClearValue){ .color = { .float32 = {0.0f, 0.0f, 0.0f, 0.0f} } }
-            : (VkClearValue){ .color = { .float32 = {0.05f, 0.05f, 0.1f, 1.0f} } },
-    };
+    VkRenderingAttachmentInfo color_attachments[MAX_RENDERPASS_TARGETS];
+    for (u32 i = 0; i < color_count; i++)
+    {
+        color_attachments[i] = (VkRenderingAttachmentInfo){
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = color_image_views[i],
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = color_loads[i] ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = image_target
+                ? (VkClearValue){ .color = { .float32 = {0.0f, 0.0f, 0.0f, 0.0f} } }
+                : (VkClearValue){ .color = { .float32 = {0.05f, 0.05f, 0.1f, 1.0f} } },
+        };
+    }
     VkRenderingAttachmentInfo depth_attachment = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageView = depth_image_view,
@@ -490,8 +532,8 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
             .extent = pass->extent,
         },
         .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment,
+        .colorAttachmentCount = color_count,
+        .pColorAttachments = color_attachments,
         .pDepthAttachment = &depth_attachment,
     };
 
@@ -570,26 +612,30 @@ static bool bake_command_buffer(render_pass_t *pass, VkCommandBuffer command_buf
 
     /* a swapchain image must be in PRESENT_SRC for vkQueuePresentKHR; an
        image target moves to SHADER_READ_ONLY for sampling by later passes */
-    VkImageMemoryBarrier finish_barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = image_target ? VK_ACCESS_SHADER_READ_BIT : 0,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = image_target ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                                  : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = color_image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .levelCount = 1,
-            .layerCount = 1,
-        },
-    };
+    VkImageMemoryBarrier finish_barriers[MAX_RENDERPASS_TARGETS];
+    for (u32 i = 0; i < color_count; i++)
+    {
+        finish_barriers[i] = (VkImageMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = image_target ? VK_ACCESS_SHADER_READ_BIT : 0,
+            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .newLayout = image_target ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                      : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = color_images[i],
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+        };
+    }
 
     vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          image_target ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
-                         0, NULL, 0, NULL, 1, &finish_barrier);
+                         0, NULL, 0, NULL, color_count, finish_barriers);
 
     return true;
 }

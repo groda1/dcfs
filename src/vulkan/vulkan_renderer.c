@@ -862,7 +862,10 @@ static bool create_logical_device()
     }
 
     const char *extensions[] = {"VK_KHR_swapchain"};
-    VkPhysicalDeviceFeatures features = {.samplerAnisotropy = true};
+    VkPhysicalDeviceFeatures features = {
+        .samplerAnisotropy = true,
+        .independentBlend = true,
+    };
 
     /* texture uploads via vkCopyMemoryToImage: no staging buffer, command
        buffer or queue submit */

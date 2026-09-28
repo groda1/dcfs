@@ -17,24 +17,31 @@
 #include "frog.h"
 #include "rules.h"
 
-#define FLOOR_TILE_COLOR_A            V4(0.30f, 0.42f, 0.28f, 1.0f)
-#define FLOOR_TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
-#define WALL_COLOR                    V4(0.4f, 0.4f, 0.2f, 1.0f)
-#define WALL_HEIGHT             2.0f
+#define FLOOR_TILE_COLOR_A          V4(0.30f, 0.42f, 0.28f, 1.0f)
+#define FLOOR_TILE_COLOR_B          V4(0.23f, 0.35f, 0.22f, 1.0f)
+#define WALL_COLOR                  V4(0.4f, 0.4f, 0.2f, 1.0f)
+#define WALL_HEIGHT                 2.0f
 
-#define FOG_BRIGHTNESS          0.35f
-#define FOG_DESATURATION        0.7f
+#define RENDER_WIDTH                (640 * 1)
+#define RENDER_HEIGHT               (360 * 1)
 
-#define PLAYER_SCALE            1.0f
-#define PLAYER_MOVE_SPEED       7.0f
-#define PLAYER_BUMP_SPEED       5.0f
-#define PLAYER_BUMP_DISTANCE    0.05f
-#define PLAYER_WALK_ANIM_SPEED  1.71f
+#define FOG_BRIGHTNESS              0.35f
+#define FOG_DESATURATION            0.7f
+#define FOG_TEAR_DEPTH              0.25f
+#define FOG_EDGE_SOFTNESS           0.06f
+#define FOG_PREVIOUSLY_KNOWN_BIT    9
+#define FOG_VOID_SHIFT              10
 
-#define CAMERA_BOT_CLAMP -2.0f
-#define CAMERA_TOP_CLAMP 5.0f
-#define CAMERA_RIGHT_CLAMP 7.0f
-#define CAMERA_LEFT_CLAMP 7.0f
+#define PLAYER_SCALE                1.0f
+#define PLAYER_MOVE_SPEED           7.0f
+#define PLAYER_BUMP_SPEED           5.0f
+#define PLAYER_BUMP_DISTANCE        0.05f
+#define PLAYER_WALK_ANIM_SPEED      1.71f
+
+#define CAMERA_BOT_CLAMP            -2.0f
+#define CAMERA_TOP_CLAMP            5.0f
+#define CAMERA_RIGHT_CLAMP          7.0f
+#define CAMERA_LEFT_CLAMP           7.0f
 
 #define CAMERA_DEFAULT_PITCH_DEG    65.0f
 #define CAMERA_DEFAULT_DISTANCE     12.0f
@@ -52,7 +59,7 @@
 #define CAMERA_NEAR                 0.1f
 #define CAMERA_FAR                  100.0f
 
-#define GAME_SLOWMOTION_FACTOR      1.0f
+#define GAME_SLOWMOTION_FACTOR      0.1f
 
 #define OUTBOX_CAPACITY             128
 
@@ -67,6 +74,36 @@ typedef struct
     vec4 color;
 } tile_instance_t;
 StaticAssert(sizeof(tile_instance_t) == 80, "quad_instance_t must match the shader's std430 stride");
+
+typedef struct
+{
+    sbo_push_constant_t sbo;
+    f32 tear_depth;
+    f32 edge_softness;
+    f32 transition;
+    f32 pad;
+} fog_mask_push_constant_t;
+
+typedef struct
+{
+    mat4 transform;
+    i32 tile_x;
+    i32 tile_y;
+    u32 visibility;
+    u32 previous;
+} fog_mask_instance_t;
+StaticAssert(sizeof(fog_mask_instance_t) == 80, "fog_mask_instance_t must match the shader's std430 stride");
+
+typedef struct
+{
+    vec2 position;
+    vec2 size;
+    texture_handle_t color_texture;
+    texture_handle_t mask_texture;
+    f32 fog_brightness;
+    f32 fog_desaturation;
+} fog_post_instance_t;
+StaticAssert(sizeof(fog_post_instance_t) == 32, "fog_post_instance_t must match the shader's std430 stride");
 
 typedef enum
 {
@@ -96,6 +133,12 @@ typedef struct
 
     mesh_handle_t cube_mesh;
     mesh_handle_t quad_mesh;
+    mesh_handle_t screen_quad_mesh;
+
+    texture_handle_t scene_texture;
+    texture_handle_t fog_mask_texture;
+    renderpass_handle_t scene_pass;
+    renderpass_handle_t fog_mask_pass;
     model_handle_t player_model;
     model_instance_handle_t player_model_instance;
     model_animation_handle_t player_walk_l_anim;
@@ -109,6 +152,13 @@ typedef struct
     buffer_object_handle_t wall_sbo;
 
     pipeline_handle_t player_pipeline;
+
+    pipeline_handle_t fog_mask_pipeline;
+    buffer_object_handle_t fog_mask_floor_sbo;
+    buffer_object_handle_t fog_mask_wall_sbo;
+
+    pipeline_handle_t fog_post_pipeline;
+    buffer_object_handle_t fog_post_sbo;
 
     buffer_object_handle_t vp_uniform;
 
@@ -138,6 +188,7 @@ typedef struct
 
     arena_t *run_arena;
     level_t level;
+    u16 *previous_flags;
     bool run_active;
     bool fov_dirty;
 
@@ -161,7 +212,11 @@ static camera_rig_t camera_rig_for(camera_mode_t mode, f32 aspect);
 static void camera_set_mode(camera_mode_t mode);
 static void draw_grid(void);
 static void draw_player(void);
-static vec4 tile_color(const tile_t *tile, vec4 color);
+static void draw_fog_post(void);
+static u32  visibility_bits(i32 x, i32 y);
+static u32  previous_visibility_bits(i32 x, i32 y);
+static f32  fog_transition(void);
+static void snapshot_tile_flags(void);
 static vec3 tile_center(i32 x, i32 y);
 static vec3 player_center(i32 x, i32 y);
 static f32  wrap_angle_deg(f32 angle);
@@ -182,6 +237,50 @@ bool Client_Init(void)
 
     g_client.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
     g_client.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_QUAD);
+    g_client.screen_quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_TEXTURED_QUAD);
+
+    sampler_handle_t sampler = Renderer_CreateSampler();
+    if (sampler == SAMPLER_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create sampler");
+        goto error;
+    }
+
+    g_client.scene_texture = Renderer_CreateRenderTexture(RENDER_WIDTH, RENDER_HEIGHT,
+                                                          RENDER_TEXTURE_FORMAT_SRGB, sampler);
+    g_client.fog_mask_texture = Renderer_CreateRenderTexture(RENDER_WIDTH, RENDER_HEIGHT,
+                                                             RENDER_TEXTURE_FORMAT_UNORM, sampler);
+    if (g_client.scene_texture == TEXTURE_HANDLE_INVALID ||
+        g_client.fog_mask_texture == TEXTURE_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create render textures");
+        goto error;
+    }
+
+    renderpass_config_t fog_mask_pass_config = {
+        .order = 0,
+        .target_count = 1,
+        .targets = {
+            { .texture = g_client.fog_mask_texture, .load = RENDER_TARGET_CLEAR },
+        },
+    };
+    renderpass_config_t scene_pass_config = {
+        .order = 1,
+        .target_count = 2,
+        .targets = {
+            { .texture = g_client.scene_texture, .load = RENDER_TARGET_CLEAR },
+            { .texture = g_client.fog_mask_texture, .load = RENDER_TARGET_LOAD },
+        },
+    };
+    g_client.fog_mask_pass = Renderer_CreateRenderPass(&fog_mask_pass_config);
+    g_client.scene_pass = Renderer_CreateRenderPass(&scene_pass_config);
+    if (g_client.scene_pass == RENDERPASS_HANDLE_INVALID ||
+        g_client.fog_mask_pass == RENDERPASS_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create render passes");
+        goto error;
+    }
+
     g_client.vp_uniform = Renderer_CreateUniformBuffer(sizeof(view_projection_t));
     if (g_client.vp_uniform == BUFFER_OBJECT_HANDLE_INVALID)
     {
@@ -206,7 +305,7 @@ bool Client_Init(void)
     };
     g_client.floor_sbo = Renderer_CreateStorageBuffer(KB(64));
 
-    g_client.floor_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &floor_pipeline_config);
+    g_client.floor_pipeline = Renderer_AddPipeline(g_client.scene_pass, &floor_pipeline_config);
     if (g_client.floor_pipeline == PIPELINE_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create floor pipeline");
@@ -230,7 +329,7 @@ bool Client_Init(void)
     };
     g_client.wall_sbo = Renderer_CreateStorageBuffer(KB(64));
 
-    g_client.wall_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &wall_pipeline_config);
+    g_client.wall_pipeline = Renderer_AddPipeline(g_client.scene_pass, &wall_pipeline_config);
     if (g_client.wall_pipeline == PIPELINE_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create wall pipeline");
@@ -245,6 +344,7 @@ bool Client_Init(void)
         .push_constant_size = sizeof(model_push_constant_t),
         .vertex_layout = &VERTEX_LAYOUT_NORMAL_MATERIAL,
         .vertex_streams = 2,
+        .color_output_count = 2,
         .uniform_binding_count = 1,
         .uniform_bindings = {
             {
@@ -255,10 +355,52 @@ bool Client_Init(void)
         },
     };
 
-    g_client.player_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &player_pipeline_config);
+    g_client.player_pipeline = Renderer_AddPipeline(g_client.scene_pass, &player_pipeline_config);
     if (g_client.player_pipeline == PIPELINE_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create player pipeline");
+        goto error;
+    }
+
+    pipeline_config_t fog_mask_pipeline_config = {
+        .name = "fog-mask",
+        .vertex_shader = Renderer_LoadShader("shaders/fog_mask.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/fog_mask.frag.spv"),
+        .push_constant_size = sizeof(fog_mask_push_constant_t),
+        .vertex_layout = &VERTEX_LAYOUT_NORMAL,
+        .uniform_binding_count = 1,
+        .uniform_bindings = {
+            {
+                .binding = 0,
+                .buffer_object = g_client.vp_uniform,
+                .stage = UNIFORM_STAGE_VERTEX,
+            },
+        },
+    };
+    g_client.fog_mask_floor_sbo = Renderer_CreateStorageBuffer(KB(64));
+    g_client.fog_mask_wall_sbo = Renderer_CreateStorageBuffer(KB(64));
+
+    g_client.fog_mask_pipeline = Renderer_AddPipeline(g_client.fog_mask_pass, &fog_mask_pipeline_config);
+    if (g_client.fog_mask_pipeline == PIPELINE_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create fog mask pipeline");
+        goto error;
+    }
+
+    pipeline_config_t fog_post_pipeline_config = {
+        .name = "fog-post",
+        .vertex_shader = Renderer_LoadShader("shaders/fog_post.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/fog_post.frag.spv"),
+        .push_constant_size = sizeof(tile_push_constant_t),
+        .vertex_layout = &VERTEX_LAYOUT_TEXTURED,
+        .disable_depth_test = true,
+    };
+    g_client.fog_post_sbo = Renderer_CreateStorageBuffer(sizeof(fog_post_instance_t));
+
+    g_client.fog_post_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &fog_post_pipeline_config);
+    if (g_client.fog_post_pipeline == PIPELINE_HANDLE_INVALID)
+    {
+        Log(ERROR, "failed to create fog post pipeline");
         goto error;
     }
 
@@ -417,6 +559,7 @@ void Client_Update(f32 delta_time)
 
     draw_grid();
     draw_player();
+    draw_fog_post();
 }
 
 void Client_HandleEvent(const event_t *event)
@@ -588,7 +731,6 @@ static void camera_set_mode(camera_mode_t mode)
 static void update_camera(f32 delta_time)
 {
     client_t *client = &g_client;
-    window_extent_t extent = Renderer_GetWindowExtent();
 
     f32 follow = CAMERA_FOLLOW_SPEED * delta_time;
     if (follow > 1.0f)
@@ -608,7 +750,7 @@ static void update_camera(f32 delta_time)
     client->camera_blend = Min(client->camera_blend + step, 1.0f);
 
     camera_rig_t rig = camera_rig_for(client->camera_mode,
-                                      (f32)extent.width / (f32)extent.height);
+                                      (f32)RENDER_WIDTH / (f32)RENDER_HEIGHT);
 
     f32 t = smoothstep(client->camera_blend);
     client->camera_cur.eye  = lerp(client->camera_from.eye, t, rig.eye);
@@ -629,9 +771,16 @@ static void update_camera(f32 delta_time)
 static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
+    fog_mask_push_constant_t fog_mask_push_constant = {
+        .tear_depth = FOG_TEAR_DEPTH,
+        .edge_softness = FOG_EDGE_SOFTNESS,
+        .transition = fog_transition(),
+    };
 
     Renderer_ClearBufferObject(g_client.floor_sbo);
     Renderer_ClearBufferObject(g_client.wall_sbo);
+    Renderer_ClearBufferObject(g_client.fog_mask_floor_sbo);
+    Renderer_ClearBufferObject(g_client.fog_mask_wall_sbo);
 
     mat4 floor_scale = HMM_Scale(V3(1.0f, 1.0f, 1.0f));
     mat4 floor_rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
@@ -655,6 +804,8 @@ static void draw_grid(void)
                 continue;
 
             vec3 floor_center = tile_center(x, y);
+            u32 visibility = visibility_bits(x, y);
+            u32 previous = previous_visibility_bits(x, y);
 
             if (tile->type == TILE_WALL)
             {
@@ -664,9 +815,18 @@ static void draw_grid(void)
                     .transform = HMM_MulM4(
                                     HMM_Translate(wall_center),
                                     wall_scale),
-                    .color = tile_color(tile, WALL_COLOR),
+                    .color = WALL_COLOR,
                 };
                 Renderer_PushBufferObject(g_client.wall_sbo, &instance, sizeof(instance));
+
+                fog_mask_instance_t mask_instance = {
+                    .transform = instance.transform,
+                    .tile_x = x,
+                    .tile_y = y,
+                    .visibility = visibility,
+                    .previous = previous,
+                };
+                Renderer_PushBufferObject(g_client.fog_mask_wall_sbo, &mask_instance, sizeof(mask_instance));
                 wall_instance_count++;
             }
             else
@@ -677,38 +837,122 @@ static void draw_grid(void)
                                     HMM_MulM4(
                                         floor_rotation,
                                         floor_scale)),
-                    .color = tile_color(tile, ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B),
+                    .color = ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B,
                 };
-
                 Renderer_PushBufferObject(g_client.floor_sbo, &instance, sizeof(instance));
+
+                fog_mask_instance_t mask_instance = {
+                    .transform = instance.transform,
+                    .tile_x = x,
+                    .tile_y = y,
+                    .visibility = visibility,
+                    .previous = previous,
+                };
+                Renderer_PushBufferObject(g_client.fog_mask_floor_sbo, &mask_instance, sizeof(mask_instance));
                 floor_instance_count++;
             }
         }
     }
 
-    Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
+    Renderer_DrawMeshInstanced(g_client.scene_pass,
         g_client.floor_pipeline,
         &push_constant,
         g_client.floor_sbo,
         floor_instance_count, g_client.quad_mesh);
 
-    Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
+    Renderer_DrawMeshInstanced(g_client.scene_pass,
         g_client.wall_pipeline,
         &push_constant,
         g_client.wall_sbo,
         wall_instance_count, g_client.cube_mesh);
+
+    Renderer_DrawMeshInstanced(g_client.fog_mask_pass,
+        g_client.fog_mask_pipeline,
+        &fog_mask_push_constant,
+        g_client.fog_mask_floor_sbo,
+        floor_instance_count, g_client.quad_mesh);
+
+    Renderer_DrawMeshInstanced(g_client.fog_mask_pass,
+        g_client.fog_mask_pipeline,
+        &fog_mask_push_constant,
+        g_client.fog_mask_wall_sbo,
+        wall_instance_count, g_client.cube_mesh);
 }
 
-static vec4 tile_color(const tile_t *tile, vec4 color)
+static u32 visibility_bits(i32 x, i32 y)
 {
-    if (tile->flags & FLAG_VISIBLE)
-        return color;
+    const level_t *level = &g_client.level;
+    u32 bits = 0;
 
-    f32 luminance = 0.30f * color.X + 0.59f * color.Y + 0.11f * color.Z;
-    vec3 grey = V3(luminance, luminance, luminance);
-    vec3 fogged = HMM_MulV3F(lerp(color.XYZ, FOG_DESATURATION, grey), FOG_BRIGHTNESS);
+    for (i32 dy = -1; dy <= 1; dy++)
+    {
+        for (i32 dx = -1; dx <= 1; dx++)
+        {
+            u32 bit = (u32)((dy + 1) * 3 + (dx + 1));
 
-    return V4(fogged.X, fogged.Y, fogged.Z, color.W);
+            if (!Level_InBounds(level, x + dx, y + dy))
+            {
+                bits |= 1u << (FOG_VOID_SHIFT + bit);
+                continue;
+            }
+
+            const tile_t *tile = Level_GetTile(level, x + dx, y + dy);
+            if (tile->flags & FLAG_VISIBLE)
+                bits |= 1u << bit;
+            if (!(tile->flags & FLAG_REVEALED) || tile->type == TILE_EMPTY)
+                bits |= 1u << (FOG_VOID_SHIFT + bit);
+        }
+    }
+
+    return bits;
+}
+
+static u32 previous_visibility_bits(i32 x, i32 y)
+{
+    const level_t *level = &g_client.level;
+    u32 bits = 0;
+
+    for (i32 dy = -1; dy <= 1; dy++)
+    {
+        for (i32 dx = -1; dx <= 1; dx++)
+        {
+            u32 bit = (u32)((dy + 1) * 3 + (dx + 1));
+
+            if (!Level_InBounds(level, x + dx, y + dy))
+            {
+                bits |= 1u << (FOG_VOID_SHIFT + bit);
+                continue;
+            }
+
+            u16 flags = g_client.previous_flags[(y + dy) * level->width + (x + dx)];
+            if (flags & FLAG_VISIBLE)
+                bits |= 1u << bit;
+            if (!(flags & FLAG_REVEALED) || Level_GetTile(level, x + dx, y + dy)->type == TILE_EMPTY)
+                bits |= 1u << (FOG_VOID_SHIFT + bit);
+        }
+    }
+
+    if (g_client.previous_flags[y * level->width + x] & FLAG_REVEALED)
+        bits |= 1u << FOG_PREVIOUSLY_KNOWN_BIT;
+
+    return bits;
+}
+
+static f32 fog_transition(void)
+{
+    if (g_client.player_anim != PLAYER_ANIM_MOVE)
+        return 1.0f;
+
+    return Min(g_client.player_anim_progress, 1.0f);
+}
+
+static void snapshot_tile_flags(void)
+{
+    const level_t *level = &g_client.level;
+    u64 tile_count = (u64)level->width * level->height;
+
+    for (u64 i = 0; i < tile_count; i++)
+        g_client.previous_flags[i] = level->tiles[i].flags;
 }
 
 static void draw_player(void)
@@ -721,8 +965,37 @@ static void draw_player(void)
                         )
                     );
 
-    ModelInstance_Draw(g_client.player_model_instance, SWAPCHAIN_PASS_HANDLE,
+    ModelInstance_Draw(g_client.player_model_instance, g_client.scene_pass,
                        g_client.player_pipeline, transform);
+}
+
+static void draw_fog_post(void)
+{
+    window_extent_t extent = Renderer_GetWindowExtent();
+
+    u32 scale = Min(extent.width / RENDER_WIDTH, extent.height / RENDER_HEIGHT);
+    if (scale < 1)
+        scale = 1;
+
+    fog_post_instance_t instance = {
+        .position = V2(0.0f, 0.0f),
+        .size = V2(2.0f * (f32)(RENDER_WIDTH * scale) / (f32)extent.width,
+                   2.0f * (f32)(RENDER_HEIGHT * scale) / (f32)extent.height),
+        .color_texture = g_client.scene_texture,
+        .mask_texture = g_client.fog_mask_texture,
+        .fog_brightness = FOG_BRIGHTNESS,
+        .fog_desaturation = FOG_DESATURATION,
+    };
+
+    Renderer_ClearBufferObject(g_client.fog_post_sbo);
+    Renderer_PushBufferObject(g_client.fog_post_sbo, &instance, sizeof(instance));
+
+    tile_push_constant_t push_constant = {};
+    Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
+        g_client.fog_post_pipeline,
+        &push_constant,
+        g_client.fog_post_sbo,
+        1, g_client.screen_quad_mesh);
 }
 
 
@@ -800,6 +1073,7 @@ static bool player_attempt_move(i32 dx, i32 dy)
 
         client->player_target_pos_x = new_x;
         client->player_target_pos_y = new_y;
+        snapshot_tile_flags();
         client->fov_dirty = true;
         client->player_anim = PLAYER_ANIM_MOVE;
         client->step_count++;
@@ -825,6 +1099,8 @@ static void handle_level_init(const event_level_init_t *init)
     client_t *client = &g_client;
 
     Level_Init(&client->level, client->run_arena, init->level_width, init->level_height);
+    client->previous_flags = arena_push_array(client->run_arena, u16,
+                                              (u64)init->level_width * init->level_height);
 
     client->move_pending = false;
     client->fov_dirty = true;

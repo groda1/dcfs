@@ -12,8 +12,7 @@ bool VulkanPass_Destroy();
 bool VulkanPass_CreateSwapchainPass(swapchain_t *swapchain);
 bool VulkanPass_RecreateSwapchainPass(swapchain_t *swapchain);
 
-renderpass_handle_t VulkanPass_CreateImagePass(texture_handle_t target_texture,
-                                               u32 order);
+renderpass_handle_t VulkanPass_CreateImagePass(const renderpass_config_t *config);
 pipeline_handle_t VulkanPass_AddPipeline(renderpass_handle_t pass_handle,
                                          const pipeline_config_t *config);
 

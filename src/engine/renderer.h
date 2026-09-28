@@ -32,12 +32,17 @@ texture_handle_t Renderer_CreateTexture(u32 width, u32 height, const u8 *rgba_da
 sampler_handle_t Renderer_CreateSampler(void);
 
 /* a texture that a render pass draws into; sampled like any loaded texture */
-texture_handle_t Renderer_CreateRenderTexture(u32 width, u32 height, sampler_handle_t sampler);
+texture_handle_t Renderer_CreateRenderTexture(u32 width, u32 height,
+                                              render_texture_format_t format,
+                                              sampler_handle_t sampler);
 
-/* a pass rendering into a render texture, cleared to transparent black each
-   frame; passes render in ascending pass_order before the swapchain pass, so
-   any pass can sample the render textures of the passes before it */
-renderpass_handle_t Renderer_CreateRenderPass(texture_handle_t target_texture, u32 pass_order);
+/* a pass rendering into one or more render textures of equal size; each
+   target is either cleared to transparent black or keeps what an earlier
+   pass rendered into it this frame. passes render in ascending order before
+   the swapchain pass, so any pass can sample the render textures of the
+   passes before it. a pipeline writes the first color_output_count targets
+   of its pass (default 1) */
+renderpass_handle_t Renderer_CreateRenderPass(const renderpass_config_t *config);
 
 pipeline_handle_t Renderer_AddPipeline(renderpass_handle_t pass_handle,
                                        const pipeline_config_t *config);
