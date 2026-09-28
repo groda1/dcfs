@@ -22,7 +22,9 @@ layout(push_constant) uniform pushConstants {
     float tear_depth;
     float edge_softness;
     float transition;
-    float pad;
+    float origin_x;
+    float origin_z;
+    float radial_sweep_radius;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

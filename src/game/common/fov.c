@@ -2,6 +2,7 @@
 #include "rules.h"
 
 static bool line_clear(const level_t *level, i32 x0, i32 y0, i32 x1, i32 y1);
+static bool faces_visible_open_tile(const level_t *level, i32 x, i32 y, i32 origin_x, i32 origin_y);
 
 void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius)
 {
@@ -38,7 +39,7 @@ void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius)
             if ((tile->flags & FLAG_VISIBLE) || !Rules_BlocksSight(level, x, y))
                 continue;
 
-            if (Fov_TouchesVisibleOpenTile(level, x, y))
+            if (faces_visible_open_tile(level, x, y, origin_x, origin_y))
                 tile->flags |= FLAG_VISIBLE;
         }
     }
@@ -54,6 +55,36 @@ bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
                 continue;
 
             if (Level_GetTile(level, nx, ny)->flags & FLAG_VISIBLE)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+static bool faces_visible_open_tile(const level_t *level, i32 x, i32 y, i32 origin_x, i32 origin_y)
+{
+    i32 toward_x = (origin_x > x) - (origin_x < x);
+    i32 toward_y = (origin_y > y) - (origin_y < y);
+
+    for (i32 dy = -1; dy <= 1; dy++)
+    {
+        for (i32 dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0)
+                continue;
+
+            if ((dx != 0 && dx == -toward_x) || (dy != 0 && dy == -toward_y))
+                continue;
+
+            if (dx != 0 && dy != 0
+                && !(Rules_BlocksSight(level, x + dx, y) && Rules_BlocksSight(level, x, y + dy)))
+                continue;
+
+            if (Rules_BlocksSight(level, x + dx, y + dy))
+                continue;
+
+            if (Level_GetTile(level, x + dx, y + dy)->flags & FLAG_VISIBLE)
                 return true;
         }
     }

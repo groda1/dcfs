@@ -11,7 +11,9 @@ layout(push_constant) uniform pushConstants {
     float tear_depth;
     float edge_softness;
     float transition;
-    float pad;
+    float origin_x;
+    float origin_z;
+    float radial_sweep_radius;
 } pc;
 
 layout(location = 0) in vec3 worldPosition;
@@ -27,8 +29,9 @@ const uint PREVIOUSLY_KNOWN_BIT = 9u;
 const uint VOID_SHIFT = 10u;
 const vec3 VOID_NOISE_OFFSET = vec3(37.1, 11.3, 23.7);
 const float MAX_TEAR_REACH = 0.45;
-const float SWEEP_REACH = 1.5;
+const float SWEEP_REACH = 1.0;
 const float NO_NEIGHBOUR = 2.0;
+const float MIN_TEAR = 0.02;
 
 float hash(vec3 p) {
     p = fract(p * 0.3183099 + 0.1);
@@ -73,12 +76,23 @@ float neighbour_distance(uint bits, vec2 local) {
 }
 
 float torn(float distance_to_set, float threshold, float softness) {
-    if (distance_to_set >= NO_NEIGHBOUR || threshold <= 0.0)
+    if (distance_to_set >= NO_NEIGHBOUR || threshold <= MIN_TEAR)
         return 0.0;
 
     return softness > 0.0
          ? 1.0 - smoothstep(threshold, threshold + softness, distance_to_set)
          : step(distance_to_set, threshold);
+}
+
+float radial(float player_distance, float front, float jitter, float softness) {
+    float d = player_distance + jitter;
+    return softness > 0.0
+         ? 1.0 - smoothstep(front, front + softness, d)
+         : step(d, front);
+}
+
+float front_threshold(float threshold, float progress) {
+    return clamp(threshold + progress * SWEEP_REACH - 1.0, 0.0, threshold);
 }
 
 void main() {
@@ -89,6 +103,7 @@ void main() {
     float depth = min(pc.tear_depth, MAX_TEAR_REACH - softness);
     float threshold = depth * (0.2 + 0.8 * noise);
     float t = clamp(pc.transition, 0.0, 1.0);
+    float player_distance = length(worldPosition.xz - vec2(pc.origin_x, pc.origin_z));
 
     uint now = visibility & 0x1FFu;
     uint before = previous & 0x1FFu;
@@ -105,20 +120,26 @@ void main() {
         float d = neighbour_distance(before, local);
         lit = d < NO_NEIGHBOUR
             ? torn(d, threshold + t * SWEEP_REACH, softness)
-            : step(noise, t);
+            : radial(player_distance, t * pc.radial_sweep_radius, threshold, softness);
     } else if (visible_before) {
         float d = neighbour_distance(now, local);
         lit = d < NO_NEIGHBOUR
             ? torn(d, threshold + (1.0 - t) * SWEEP_REACH, softness)
-            : step(t, noise);
+            : radial(player_distance, (1.0 - t) * pc.radial_sweep_radius, threshold, softness);
     } else {
         uint kept = now & before & NEIGHBOUR_BITS;
         uint lost = before & ~now & NEIGHBOUR_BITS;
         uint gained = now & ~before & NEIGHBOUR_BITS;
 
+        float lost_threshold = front_threshold(threshold, 1.0 - t);
+        float gained_threshold = front_threshold(threshold, t);
+        float softness_scale = softness / max(threshold, 1e-5);
+
         lit = max(torn(neighbour_distance(kept, local), threshold, softness),
-              max(torn(neighbour_distance(lost, local), threshold * (1.0 - t), softness * (1.0 - t)),
-                  torn(neighbour_distance(gained, local), threshold * t, softness * t)));
+              max(torn(neighbour_distance(lost, local), lost_threshold,
+                       softness_scale * lost_threshold),
+                  torn(neighbour_distance(gained, local), gained_threshold,
+                       softness_scale * gained_threshold)));
     }
 
     float known = (known_before || t >= 1.0) ? 1.0
@@ -128,8 +149,9 @@ void main() {
     float void_threshold = depth * (0.2 + 0.8 * tear_noise(worldPosition + VOID_NOISE_OFFSET));
     float void_torn = max(
         torn(neighbour_distance(void_now, local), void_threshold, softness),
-        torn(neighbour_distance(void_before & ~void_now, local),
-             void_threshold * (1.0 - t), softness * (1.0 - t)));
+        known_before ? torn(neighbour_distance(void_before & ~void_now, local),
+                            void_threshold * (1.0 - t), softness * (1.0 - t))
+                     : 0.0);
 
     known = min(known, 1.0 - void_torn);
 

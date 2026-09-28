@@ -31,6 +31,7 @@
 #define FOG_EDGE_SOFTNESS           0.06f
 #define FOG_PREVIOUSLY_KNOWN_BIT    9
 #define FOG_VOID_SHIFT              10
+#define FOG_RADIAL_SWEEP_RADIUS     (FOV_RADIUS + 1.5f)
 
 #define PLAYER_SCALE                1.0f
 #define PLAYER_MOVE_SPEED           7.0f
@@ -59,7 +60,7 @@
 #define CAMERA_NEAR                 0.1f
 #define CAMERA_FAR                  100.0f
 
-#define GAME_SLOWMOTION_FACTOR      0.1f
+#define GAME_SLOWMOTION_FACTOR      0.5f
 
 #define OUTBOX_CAPACITY             128
 
@@ -81,7 +82,9 @@ typedef struct
     f32 tear_depth;
     f32 edge_softness;
     f32 transition;
-    f32 pad;
+    f32 origin_x;
+    f32 origin_z;
+    f32 radial_sweep_radius;
 } fog_mask_push_constant_t;
 
 typedef struct
@@ -198,6 +201,8 @@ typedef struct
     bool move_pending;
     u32 pending_sequence;
     u32 next_sequence;
+
+    bool paused;
 
     array_queue_t outbox;
 } client_t;
@@ -482,6 +487,12 @@ void Client_HandleKeyDown(key_code_t key)
         return;
     }
 
+    if (key == KEY_F12)
+    {
+        Log(DEBUG, "toggle pause");
+        client->paused = !client->paused;
+    }
+
     if (client->player_anim == PLAYER_ANIM_NONE && !client->move_pending)
     {
         switch (key)
@@ -545,6 +556,8 @@ void Client_Update(f32 delta_time)
 {
     if (!g_client.run_active)
         return;
+    if (g_client.paused)
+        goto draw;
 
     delta_time *= GAME_SLOWMOTION_FACTOR;
 
@@ -557,6 +570,7 @@ void Client_Update(f32 delta_time)
     update_player(delta_time);
     update_camera(delta_time);
 
+draw:
     draw_grid();
     draw_player();
     draw_fog_post();
@@ -771,10 +785,14 @@ static void update_camera(f32 delta_time)
 static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
+    vec3 fov_origin = tile_center(g_client.player_target_pos_x, g_client.player_target_pos_y);
     fog_mask_push_constant_t fog_mask_push_constant = {
         .tear_depth = FOG_TEAR_DEPTH,
         .edge_softness = FOG_EDGE_SOFTNESS,
         .transition = fog_transition(),
+        .origin_x = fov_origin.X,
+        .origin_z = fov_origin.Z,
+        .radial_sweep_radius = FOG_RADIAL_SWEEP_RADIUS,
     };
 
     Renderer_ClearBufferObject(g_client.floor_sbo);
@@ -882,6 +900,7 @@ static void draw_grid(void)
 static u32 visibility_bits(i32 x, i32 y)
 {
     const level_t *level = &g_client.level;
+    bool wall = Level_GetTile(level, x, y)->type == TILE_WALL;
     u32 bits = 0;
 
     for (i32 dy = -1; dy <= 1; dy++)
@@ -897,7 +916,7 @@ static u32 visibility_bits(i32 x, i32 y)
             }
 
             const tile_t *tile = Level_GetTile(level, x + dx, y + dy);
-            if (tile->flags & FLAG_VISIBLE)
+            if ((tile->flags & FLAG_VISIBLE) && (!wall || tile->type == TILE_WALL))
                 bits |= 1u << bit;
             if (!(tile->flags & FLAG_REVEALED) || tile->type == TILE_EMPTY)
                 bits |= 1u << (FOG_VOID_SHIFT + bit);
@@ -910,6 +929,7 @@ static u32 visibility_bits(i32 x, i32 y)
 static u32 previous_visibility_bits(i32 x, i32 y)
 {
     const level_t *level = &g_client.level;
+    bool wall = Level_GetTile(level, x, y)->type == TILE_WALL;
     u32 bits = 0;
 
     for (i32 dy = -1; dy <= 1; dy++)
@@ -925,9 +945,10 @@ static u32 previous_visibility_bits(i32 x, i32 y)
             }
 
             u16 flags = g_client.previous_flags[(y + dy) * level->width + (x + dx)];
-            if (flags & FLAG_VISIBLE)
+            u16 type = Level_GetTile(level, x + dx, y + dy)->type;
+            if ((flags & FLAG_VISIBLE) && (!wall || type == TILE_WALL))
                 bits |= 1u << bit;
-            if (!(flags & FLAG_REVEALED) || Level_GetTile(level, x + dx, y + dy)->type == TILE_EMPTY)
+            if (!(flags & FLAG_REVEALED) || type == TILE_EMPTY)
                 bits |= 1u << (FOG_VOID_SHIFT + bit);
         }
     }
