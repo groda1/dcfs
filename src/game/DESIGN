@@ -683,15 +683,38 @@ differ):
     draw it". TILE_REVEAL carries only the terrain type; server flags
     never cross the wire.
   - Startup: the server sends LEVEL_INIT (extents only), PLAYER_MOVED
-    (initial placement), then TILE_REVEAL for the square of
-    REVEAL_RADIUS around the player (placeholder for FOV), and finally
+    (initial placement), then TILE_REVEAL for every tile in the player's
+    FOV (see below), and finally
     RUN_START. RUN_START closes the initial burst: the client's single
     run_active flag is set there, so run_active always implies the level
     and the player exist. Nothing is drawn and no input is taken before
     it. Separate "is the level ready" / "is the player placed" flags
-    were tried and rejected. After each
-    move it reveals the square again and sends ONLY tiles not already
-    revealed.
+    were tried and rejected. After each move it recomputes FOV and sends
+    ONLY visible tiles not already revealed.
+  - FOV (pulled forward from milestone 3), common/fov.c, one shared
+    function Fov_Compute(level, x, y, radius). It clears and sets
+    FLAG_VISIBLE on the level it is given. Circle of FOV_RADIUS 7
+    (DCSS's default), in-radius test dx^2 + dy^2 <= r^2 + r for a rounder
+    edge. A tile is visible if a Bresenham line from the origin to it,
+    OR from it back to the origin, passes no sight-blocking tile. Only
+    TILE_WALL blocks (Rules_BlocksSight). The blocking tile itself is
+    visible. A second pass makes any in-radius wall that touches a
+    visible open tile visible too. Without it, a wall the player stands
+    next to is partly dark, because lines nearly parallel to it clip the
+    adjacent wall tile.
+  - The server runs FOV on the true map and is the authority on what
+    gets revealed. The client runs the SAME function on its own known
+    map, purely to split revealed tiles into "visible now" (normal
+    colors) and "remembered" (fog: desaturated 70% towards grey, then
+    35% brightness). The client recomputes lazily (fov_dirty), set ONLY
+    where FOV inputs change: its known map (LEVEL_INIT, TILE_REVEAL) or
+    its position (a predicted move, or any snap to a server position).
+    Events that change neither must not set it. It computes from its
+    predicted position, so the fog moves the instant you step. Unknown tiles are TILE_EMPTY on the
+    client and don't block sight, which is harmless because they aren't
+    drawn. This supersedes milestone 3's "memory streamed as remembered
+    cell state" for terrain. Entity visibility (monsters) will still be
+    the server's call, never inferred from the client's FOV.
   - PLAYER_MOVED is a fact, "the player is now at x,y", used for
     placement and movement alike.
   - Client prediction is an overlay, as the prediction section
@@ -740,6 +763,8 @@ MILESTONE 3 (agreed): monster, FOV, fog of war
 ----------------------------------------------
 
 A simple monster that wanders the level, plus FOV and fog of war.
+(Terrain FOV and fog of war were done early, in milestone 2. See
+there.)
 This is the milestone where the hidden-information machinery becomes
 real: the server computes FOV and only sends visible cells; map
 memory (fog of war) is tracked server-side per player and streamed as

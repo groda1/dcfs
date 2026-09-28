@@ -5,5 +5,6 @@
 #include "level.h"
 
 bool Rules_IsWalkable(const level_t *level, i32 x, i32 y);
+bool Rules_BlocksSight(const level_t *level, i32 x, i32 y);
 
 #endif

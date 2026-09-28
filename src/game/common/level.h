@@ -14,6 +14,7 @@ typedef enum
 typedef enum
 {
     FLAG_REVEALED = 1 << 0,
+    FLAG_VISIBLE  = 1 << 1,
 } tile_flag_t;
 
 typedef struct

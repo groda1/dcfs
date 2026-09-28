@@ -1,6 +1,7 @@
 #include "server.h"
 
 #include "array_queue.h"
+#include "fov.h"
 #include "level.h"
 #include "level_gen.h"
 #include "log.h"
@@ -12,8 +13,6 @@
 #define LEVEL_HEIGHT            128
 
 #define OUTBOX_CAPACITY         1024
-
-#define REVEAL_RADIUS           5
 
 typedef struct
 {
@@ -31,7 +30,7 @@ typedef struct
 
 static server_t g_server;
 
-static void reveal_around_player(void);
+static void reveal_visible(void);
 static void handle_move(const command_move_t *move);
 static void send(const event_t *event);
 
@@ -67,7 +66,7 @@ bool Server_Init(u64 seed)
     };
     send(&placed);
 
-    reveal_around_player();
+    reveal_visible();
 
     event_t start = {
         .type = RUN_START,
@@ -108,20 +107,22 @@ bool Server_PollEvent(event_t *event)
     return ArrayQueue_Pop(&g_server.outbox, event);
 }
 
-static void reveal_around_player(void)
+static void reveal_visible(void)
 {
     server_t *server = &g_server;
     level_t *level = &server->level;
 
-    for (i32 y = server->player_y - REVEAL_RADIUS; y <= server->player_y + REVEAL_RADIUS; y++)
+    Fov_Compute(level, server->player_x, server->player_y, FOV_RADIUS);
+
+    for (i32 y = server->player_y - FOV_RADIUS; y <= server->player_y + FOV_RADIUS; y++)
     {
-        for (i32 x = server->player_x - REVEAL_RADIUS; x <= server->player_x + REVEAL_RADIUS; x++)
+        for (i32 x = server->player_x - FOV_RADIUS; x <= server->player_x + FOV_RADIUS; x++)
         {
             if (!Level_InBounds(level, x, y))
                 continue;
 
             tile_t *tile = Level_GetTile(level, x, y);
-            if (tile->flags & FLAG_REVEALED)
+            if (!(tile->flags & FLAG_VISIBLE) || (tile->flags & FLAG_REVEALED))
                 continue;
 
             tile->flags |= FLAG_REVEALED;
@@ -168,7 +169,7 @@ static void handle_move(const command_move_t *move)
     };
     send(&moved);
 
-    reveal_around_player();
+    reveal_visible();
 }
 
 static void send(const event_t *event)

@@ -6,6 +6,7 @@
 
 #include "client.h"
 #include "engine_types.h"
+#include "fov.h"
 #include "level.h"
 #include "memory_arena.h"
 #include "mesh.h"
@@ -18,7 +19,11 @@
 
 #define FLOOR_TILE_COLOR_A            V4(0.30f, 0.42f, 0.28f, 1.0f)
 #define FLOOR_TILE_COLOR_B            V4(0.23f, 0.35f, 0.22f, 1.0f)
+#define WALL_COLOR                    V4(0.4f, 0.4f, 0.2f, 1.0f)
 #define WALL_HEIGHT             2.0f
+
+#define FOG_BRIGHTNESS          0.35f
+#define FOG_DESATURATION        0.7f
 
 #define PLAYER_SCALE            1.0f
 #define PLAYER_MOVE_SPEED       7.0f
@@ -134,6 +139,7 @@ typedef struct
     arena_t *run_arena;
     level_t level;
     bool run_active;
+    bool fov_dirty;
 
     i32 server_player_x;
     i32 server_player_y;
@@ -155,6 +161,7 @@ static camera_rig_t camera_rig_for(camera_mode_t mode, f32 aspect);
 static void camera_set_mode(camera_mode_t mode);
 static void draw_grid(void);
 static void draw_player(void);
+static vec4 tile_color(const tile_t *tile, vec4 color);
 static vec3 tile_center(i32 x, i32 y);
 static vec3 player_center(i32 x, i32 y);
 static f32  wrap_angle_deg(f32 angle);
@@ -398,6 +405,12 @@ void Client_Update(f32 delta_time)
         return;
 
     delta_time *= GAME_SLOWMOTION_FACTOR;
+
+    if (g_client.fov_dirty)
+    {
+        Fov_Compute(&g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y, FOV_RADIUS);
+        g_client.fov_dirty = false;
+    }
 
     update_player(delta_time);
     update_camera(delta_time);
@@ -651,7 +664,7 @@ static void draw_grid(void)
                     .transform = HMM_MulM4(
                                     HMM_Translate(wall_center),
                                     wall_scale),
-                    .color = V4(0.4f, 0.4f, 0.2f, 1.0f)
+                    .color = tile_color(tile, WALL_COLOR),
                 };
                 Renderer_PushBufferObject(g_client.wall_sbo, &instance, sizeof(instance));
                 wall_instance_count++;
@@ -664,7 +677,7 @@ static void draw_grid(void)
                                     HMM_MulM4(
                                         floor_rotation,
                                         floor_scale)),
-                    .color = ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B,
+                    .color = tile_color(tile, ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B),
                 };
 
                 Renderer_PushBufferObject(g_client.floor_sbo, &instance, sizeof(instance));
@@ -684,6 +697,18 @@ static void draw_grid(void)
         &push_constant,
         g_client.wall_sbo,
         wall_instance_count, g_client.cube_mesh);
+}
+
+static vec4 tile_color(const tile_t *tile, vec4 color)
+{
+    if (tile->flags & FLAG_VISIBLE)
+        return color;
+
+    f32 luminance = 0.30f * color.X + 0.59f * color.Y + 0.11f * color.Z;
+    vec3 grey = V3(luminance, luminance, luminance);
+    vec3 fogged = HMM_MulV3F(lerp(color.XYZ, FOG_DESATURATION, grey), FOG_BRIGHTNESS);
+
+    return V4(fogged.X, fogged.Y, fogged.Z, color.W);
 }
 
 static void draw_player(void)
@@ -775,6 +800,7 @@ static bool player_attempt_move(i32 dx, i32 dy)
 
         client->player_target_pos_x = new_x;
         client->player_target_pos_y = new_y;
+        client->fov_dirty = true;
         client->player_anim = PLAYER_ANIM_MOVE;
         client->step_count++;
 
@@ -801,6 +827,7 @@ static void handle_level_init(const event_level_init_t *init)
     Level_Init(&client->level, client->run_arena, init->level_width, init->level_height);
 
     client->move_pending = false;
+    client->fov_dirty = true;
 }
 
 static void handle_tile_reveal(const event_tile_reveal_t *reveal)
@@ -816,6 +843,8 @@ static void handle_tile_reveal(const event_tile_reveal_t *reveal)
     tile_t *tile = Level_GetTile(&client->level, reveal->x, reveal->y);
     tile->type = reveal->tile;
     tile->flags |= FLAG_REVEALED;
+
+    client->fov_dirty = true;
 }
 
 static void handle_player_moved(const event_player_moved_t *moved)
@@ -870,6 +899,7 @@ static void snap_player_to(i32 x, i32 y)
     client->player_anim = PLAYER_ANIM_NONE;
     client->player_gfx_pos = player_center(x, y);
     client->player_gfx_target_pos = client->player_gfx_pos;
+    client->fov_dirty = true;
 }
 
 static void send(const command_t *command)
