@@ -13,7 +13,7 @@
 
 #define OUTBOX_CAPACITY         1024
 
-#define REVEAL_RADIUS           3
+#define REVEAL_RADIUS           5
 
 typedef struct
 {
