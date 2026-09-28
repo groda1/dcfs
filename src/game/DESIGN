@@ -798,15 +798,24 @@ DECIDED: rendering: fog of war
 ------------------------------
 
 Three passes:
-  1. fog mask (image pass, order 0): the tile geometry, into
+  1. fog mask (image pass, order 0): the world's surfaces, into
      a UNORM 640x360 target (a linear format, because the values are
-     data, not color). Each tile instance carries its tile coordinate and
-     9 visibility bits: its own FLAG_VISIBLE and those of its 8
-     neighbours. The shader writes 1 for visible tiles. For fogged tiles
-     it computes the distance from the fragment to the nearest visible
-     neighbour tile, and compares that against a world-anchored noise
+     data, not color). Every surface is its own fog surface and its own
+     quad (decided): a floor, a wall top, and each existing wall side.
+     The mask pass draws a wall as a top quad plus one quad per side,
+     not as a cube. The scene still draws cubes, and the two geometries
+     match. Each quad instance (fog_mask_instance_t, built by the
+     client's fog module, client/fog.c, including its transform) carries
+     a 2-bit state for itself and for its neighbours in its own plane
+     (NONE, LIT, PENDING), and the front samples described under "Fog
+     transitions" below. The shader works in the quad's own (u, v),
+     taken straight from the quad's vertex position, so it has no
+     special case for sides. A LIT surface writes 1. Everywhere else it
+     computes the distance from the fragment to the nearest lit part of
+     its neighbourhood and compares that against a world-anchored noise
      threshold (3D value noise on world position, so the pattern doesn't
-     swim with the camera and wall faces tear too). The result is a torn
+     swim with the camera, and edges carry on unbroken across the corner
+     between surfaces). The result is a torn
      edge that always lies INSIDE the first fogged tiles, never eating
      into the lit area. Visibility stays binary; the tear is purely
      rendering. Tiles next to VOID (neighbour unrevealed,
@@ -816,35 +825,46 @@ Three passes:
      fog tile between the lit area and the void has two torn edges. The
      void tear applies to EVERY tile, lit ones included (e.g. a visible
      wall with nothing known behind it gets a torn outer edge), so it
-     doesn't depend on visibility at all. During a step, only the tear
-     from neighbours that just got revealed shrinks away, with (1 - t),
-     and only on tiles that were already known. A tile being revealed
-     has its own dissolve from black, and the extra shrinking band drew
-     black lines between newly revealed tiles. Instance bits:
-     visibility = [0..8] visible now, [10..18] void now; previous =
-     [0..8] visible before, 9 known before, [10..18] void before.
-     Walls tear ONLY from walls (decided, after three failed attempts
-     at wall faces). For a wall tile, the client sets a neighbour's
-     visibility bit only if that neighbour is also a wall. Floors keep
-     all neighbours. A wall top is joined to other wall tops. Its edge
-     towards a floor tile drops down the face, so a lit floor tearing
-     onto a fogged wall's top drew a lit strip floating above a grey
-     face. With floors masked out, vertical faces need no special case.
-     A face lies on its tile's boundary and uses the same 2D tear as the
-     top, from the position projected to the ground. The neighbour it
-     faces is never a wall (otherwise there'd be no face), so the old
-     distance-0 problem is gone. What remains are the walls at its
-     sides, so a lit wall next to a fogged one tears the fogged face
-     with a vertical torn edge. The 3D noise makes that edge continue
-     the top's edge unbroken. Faces sweep with the same fronts as the
-     tops during a step. Failed attempts, for the record: (1) faces in
-     the 2D tear with floors counted. The face touches the floor it
-     faces at distance 0, so a fogged wall in front of a lit floor had a
-     fully lit face, and it dissolved in noise order. (2) Folding the
-     face into the tile. That squeezed a 2-unit face into half a tile:
-     lit bands and wide noise blotches. (3) Faces showing their own
-     wall's state, wiping top-down on change. That gave hard face edges
-     under torn tops, and left the floating strip in place.
+     doesn't depend on visibility at all. A side that faces a void tile
+     is hidden entirely (known 0). A neighbour that is still
+     being revealed counts as void for a fully known tile, until that
+     neighbour's own torn "known" edge reaches the shared border. From
+     then on, the void tear recedes with it. A tile that is itself being
+     revealed gets no void tear from such neighbours: its own "known"
+     edge already has the tear, and tearing both drew black gaps between
+     neighbouring revealed tiles. Instance flags: [0..8] void, [9..17]
+     neighbours being revealed, [18..19] known mode, 20 hidden.
+     Tears only pass between surfaces of the same kind (decided): floors
+     tear from floors, wall tops from wall tops, and wall sides from the
+     sides next to them. Those can be coplanar neighbours, the same
+     wall's other side around an outer corner, or the side meeting it
+     at an inner corner. A floor or a top uses its 8 tile neighbours of
+     the same kind. A side uses only its left and right neighbours.
+     A wall side is lit only when the wall is visible AND the tile it
+     faces is visible (decided): you can only see a side from a tile you
+     can see. The side facing away from the player, which our camera
+     often shows, stays fog.
+     History, for the record:
+       - Floors used to tear from walls. A fogged floor BEHIND a lit
+         wall then showed a lit strip along the wall's base (seeing
+         through the wall).
+       - Tops used to tear from floors. A lit floor then drew a lit
+         strip on a fogged wall's top, floating above a grey side.
+       - Failed ways of fitting sides into the ground-plane tear:
+         (1) Faces in the 2D tear with floors counted. The face touches
+             the floor it faces at distance 0, so a fogged wall in front
+             of a lit floor had a fully lit face, and it dissolved in
+             noise order.
+         (2) Folding the face into the tile. That squeezed a 2-unit face
+             into half a tile: lit bands and wide noise blotches.
+         (3) Faces showing their own wall's state, wiping top-down on
+             change. That gave hard face edges under torn tops, and left
+             the floating strip in place.
+         (4) Faces projected to the tile edge and torn by the lateral
+             wall BOXES. A lit wall lit the strip on every fogged side
+             next to it, even when its own side was fogged. And during
+             a transition a side borrowed the top's samples for its
+             upper row, so it could flash lit.
   2. scene (image pass, order 1, TWO targets): the sRGB 640x360 scene
      color (cleared), plus the fog mask LOADED from pass 1. Tile
      pipelines write only the color target. Entities write both, i.e.
@@ -866,61 +886,87 @@ enforces it with MAX_TEAR_REACH 0.45, clamping softness first and then
 depth. Without the cap, a fogged tile with lit neighbours on two or more
 sides was eaten from every side and looked almost lit.
 
-Movement transitions (decided: directional sweep). Visibility changes the
-moment a move is predicted, but the mask animates the change over the
-walk, so the fog edge moves with the player instead of snapping:
-  - The client snapshots all tile flags when it predicts a move
-    (previous_flags, run arena), before any new reveals arrive. The
-    progress t is the walk animation's progress. Standing still, bumps
-    and snaps give t = 1, i.e. no transition.
-  - Each mask instance carries the previous 9 visibility bits too, plus
-    bit 9 = "was already revealed".
-  - Tile coming into view: torn open from the previously visible side, with
-    the tear threshold growing by t * SWEEP_REACH tiles.
-    SWEEP_REACH = 1.0 (decided): the front moves exactly one tile per
-    step, at constant speed. It was 1.5, so the front could also reach
-    the far corner of a tile whose only visible neighbour is diagonal.
-    But then a wall leaving view sat unchanged for half the step (the
-    front was still crossing the empty space beyond it) and then swept at
-    1.5x speed. Cost of 1.0: a diagonal-only corner beyond th + 1 is
-    finished by the t = 1 snap rather than by the front.
-    Tile leaving view: closed towards the still-visible side, the reverse.
-    Fogged before and after: the tear from neighbours that stayed visible
-    is untouched. The tears from lost and gained neighbours follow the
-    SAME front as the sweep: the front is SWEEP_REACH * t tiles from the
-    old edge, and this tile is one tile further out. So its threshold is
-    clamp(th + progress * SWEEP_REACH - 1, 0, th), with progress = t for
-    gained and 1 - t for lost. An earlier version scaled the threshold
-    linearly (th * t). That lit the FAR edge of a tile that was being
-    swept open from the near side, because the fog neighbour beyond it
-    started its tear immediately. Unchanged edges never flicker.
-    Any tear thinner than MIN_TEAR (0.02 tiles, below a pixel) counts
-    as no tear. A threshold shrinking towards 0 otherwise leaves a
-    dotted hairline on the exact tile boundary.
-  - No neighbour to sweep from or towards (a block that enters or
-    leaves view several tiles deep: a corridor seen or lost through a
-    doorway, a wall together with its floor, the far side of a room after
-    a diagonal step): RADIAL sweep around the FOV origin (the player's
-    destination tile center, in the push constant). Going dark, the front
-    collapses from FOG_RADIAL_SWEEP_RADIUS (FOV_RADIUS + 1.5) towards the
-    player over the step. Coming into view, it expands outwards from the
-    player. The tear noise is added to the distance, so the edge is torn
-    too. It ignores walls: a corridor behind a door closes from its far
-    end towards the door. Decided by the user over the original noise
-    dissolve, which read as speckles.
-  - Newly revealed tiles that are NOT visible (the reveal-margin ring)
-    dissolve from black to fog over the step. There's no directional
-    info for them.
-  - Mask green channel = "known". Tiles revealed for the first time open
-    out of black with the same sweep instead of popping in. The post pass
-    multiplies by it. Undrawn (unknown) tiles are 0, i.e. black.
-Limit: the shader only sees each tile's 3x3 neighbourhood, so a sweep
-covers one tile of travel. Anything further is the dissolve fallback.
-PARKED idea (user: "maybe test later"): make first reveals (black ->
-known) sweep instead of dissolving with noise. The void-before bits
-already say which neighbours were known, so "known" could sweep in from
-that side on the same front as the lit sweep. Noise would stay only for a
-tile with no previously known neighbour.
+Fog transitions (decided: constant speed, own clock). The mask no longer
+follows the walk animation. A change of visibility spreads over the
+surfaces at FOG_SPEED tiles per second (value to be tuned), and it may
+keep going after the step has ended.
+  - Rule (decided): light spreads from what is already lit, and fog
+    spreads from what is already fogged. Stepping behind a corner, the
+    shadow swings across from where it was. Walking away, the edge of
+    the view slides after you. Declined alternative: fog pushing out
+    from what is still visible. It fogs a strip next to the corner first
+    and leaves a lit patch beyond it, which isn't how shadows move.
+  - Distances are measured along the surfaces, in world units (decided,
+    the simpler option): going up a wall side costs its height
+    (WALL_HEIGHT). Lit from the floor, a wall's side lights bottom-up,
+    and then its top. Declined: weighting sides so they move at the same
+    on-screen speed as floors.
+  - Samples: every surface near the player (floor, wall top, wall side)
+    has a 3x3 grid of samples, at half-tile spacing across it and, on a
+    side, at half-height spacing up it. Samples belong to their tile, so
+    a tile's samples never disagree about its state. Coinciding samples
+    of surfaces of the same kind are joined at no cost: neighbouring
+    floors, neighbouring tops, and sides meeting at an edge or a corner.
+    Light crossing a crease between kinds (floor to side bottom, side
+    top to wall top) costs FOG_TEAR_DEPTH + FOG_EDGE_SOFTNESS, in either
+    direction. At rest neither tears onto the other, so the light must
+    start below the tear instead of popping a strip in. Fog spreading
+    costs nothing there.
+  - On each view change (the client's FOV recompute), a Dijkstra over
+    the samples within FOV_RADIUS + 4 of the player gives every sample
+    whose state changes the time the change reaches it. Sources are the
+    samples already in their new state. A change only travels through
+    samples heading for the same state: light through the newly visible
+    area, fog through the newly fogged one. A sample already on its way
+    keeps its time. A sample whose change is reversed half-way is
+    mirrored in time, so its front distance carries on without a jump.
+    That is what lets overlapping steps chain without popping. Samples
+    nothing reaches (run start, where nothing is lit yet) get a radial
+    time: light spreads out from the player, fog closes in from
+    FOV_RADIUS + 1.
+  - Per frame, each sample's front distance is FOG_SPEED * (time -
+    clock), signed so that negative means lit. The shader interpolates
+    the surface's own samples bilinearly. For a PENDING
+    neighbour, it adds that neighbour's samples along the shared edge to
+    the box distance, so the torn strip in a fogged tile grows as the
+    light reaches the shared edge. Everything else is the rest-state
+    logic, so at rest the look is unchanged. A tile settles back to
+    plain LIT or NONE once every sample is a full tear reach past its
+    time.
+  - State lives in a 32x32 wrap-around window of per-tile records. The
+    clock resets to 0 whenever nothing is pending or being revealed. A
+    new record starts as known if its tile was already revealed when
+    the current move was predicted. The fog module snapshots tile flags
+    at that moment for this.
+  - Mask green channel = "known". Undrawn (unknown) tiles are 0, i.e.
+    black. First reveals (decided, after revealed walls popped in grey at
+    run start) follow a "known" front at FOG_SPEED. It comes from a
+    second Dijkstra over the same samples, run after the light pass.
+    "Known" spreads only from lit samples (from when their light
+    arrives), never from tiles already known in fog. When it could, it
+    ran along known wall tops and drew the next room's outline ahead of
+    the light. It LEADS the light by FOG_KNOWN_LEAD = 1 tile (decided),
+    the width of the fogged ring around the view at rest. So during a
+    reveal, the fog-to-black edge moves together with the lit-to-fog
+    edge, one tile ahead of it. Without the lead, a newly revealed
+    tile came out of black exactly as the light reached it: the black
+    edge sat on the lit edge, and the fog ring only appeared once the
+    light stopped.
+    Climbing a wall side costs nothing extra here: the floor-to-side cost
+    exists only for the light's rest-state rule, and with it the bottoms
+    of sides lagged and drew black lines. The shader shows known =
+    max(torn known front, lit) for a tile being revealed.
+  - The noise dissolve (known mode DISSOLVE, driven by the walk
+    progress t) stays in the shader but nothing uses it now. It is kept
+    for a future "reveal all" command, which should appear that way
+    (user). The walk progress t is only used by it.
+  - The first view of a run spreads out from the player, since nothing
+    was lit before it.
+  - Replaced, for the record: a per-tile sweep tied to the walk. The
+    front moved SWEEP_REACH tiles per step, and a radial fallback
+    crossed the whole view in one step, so the speed differed by case.
+    A wall side is only a line on the ground plane, so fronts crossed it
+    instantly and it popped.
 
 Why tiles get a separate mask pass while entities write the mask from
 the scene pass: tile pipelines stay unaware of fog, and the torn-edge

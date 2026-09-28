@@ -6,6 +6,7 @@
 
 #include "client.h"
 #include "engine_types.h"
+#include "fog.h"
 #include "fov.h"
 #include "level.h"
 #include "memory_arena.h"
@@ -27,11 +28,6 @@
 
 #define FOG_BRIGHTNESS              0.25f
 #define FOG_DESATURATION            0.8f
-#define FOG_TEAR_DEPTH              0.25f
-#define FOG_EDGE_SOFTNESS           0.12f
-#define FOG_PREVIOUSLY_KNOWN_BIT    9
-#define FOG_VOID_SHIFT              10
-#define FOG_RADIAL_SWEEP_RADIUS     (FOV_RADIUS + 1.5f)
 
 #define PLAYER_SCALE                1.0f
 #define PLAYER_MOVE_SPEED           7.0f
@@ -60,7 +56,7 @@
 #define CAMERA_NEAR                 0.1f
 #define CAMERA_FAR                  100.0f
 
-#define GAME_SLOWMOTION_FACTOR      0.5f
+#define GAME_SLOWMOTION_FACTOR      1.0f
 
 #define OUTBOX_CAPACITY             128
 
@@ -82,20 +78,8 @@ typedef struct
     f32 tear_depth;
     f32 edge_softness;
     f32 transition;
-    f32 origin_x;
-    f32 origin_z;
-    f32 radial_sweep_radius;
+    f32 pad;
 } fog_mask_push_constant_t;
-
-typedef struct
-{
-    mat4 transform;
-    i32 tile_x;
-    i32 tile_y;
-    u32 visibility;
-    u32 previous;
-} fog_mask_instance_t;
-StaticAssert(sizeof(fog_mask_instance_t) == 80, "fog_mask_instance_t must match the shader's std430 stride");
 
 typedef struct
 {
@@ -157,8 +141,7 @@ typedef struct
     pipeline_handle_t player_pipeline;
 
     pipeline_handle_t fog_mask_pipeline;
-    buffer_object_handle_t fog_mask_floor_sbo;
-    buffer_object_handle_t fog_mask_wall_sbo;
+    buffer_object_handle_t fog_mask_sbo;
 
     pipeline_handle_t fog_post_pipeline;
     buffer_object_handle_t fog_post_sbo;
@@ -191,7 +174,6 @@ typedef struct
 
     arena_t *run_arena;
     level_t level;
-    u16 *previous_flags;
     bool run_active;
     bool fov_dirty;
 
@@ -218,10 +200,7 @@ static void camera_set_mode(camera_mode_t mode);
 static void draw_grid(void);
 static void draw_player(void);
 static void draw_fog_post(void);
-static u32  visibility_bits(i32 x, i32 y);
-static u32  previous_visibility_bits(i32 x, i32 y);
 static f32  fog_transition(void);
-static void snapshot_tile_flags(void);
 static vec3 tile_center(i32 x, i32 y);
 static vec3 player_center(i32 x, i32 y);
 static f32  wrap_angle_deg(f32 angle);
@@ -239,6 +218,7 @@ bool Client_Init(void)
     g_client.arena = MemoryArena_Create("client-arena");
     g_client.run_arena = MemoryArena_Create("client-run-arena");
     g_client.outbox = ArrayQueue_Create(g_client.arena, sizeof(command_t), OUTBOX_CAPACITY);
+    Fog_Init(g_client.arena, WALL_HEIGHT);
 
     g_client.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
     g_client.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_QUAD);
@@ -382,8 +362,7 @@ bool Client_Init(void)
             },
         },
     };
-    g_client.fog_mask_floor_sbo = Renderer_CreateStorageBuffer(KB(64));
-    g_client.fog_mask_wall_sbo = Renderer_CreateStorageBuffer(KB(64));
+    g_client.fog_mask_sbo = Renderer_CreateStorageBuffer(KB(256));
 
     g_client.fog_mask_pipeline = Renderer_AddPipeline(g_client.fog_mask_pass, &fog_mask_pipeline_config);
     if (g_client.fog_mask_pipeline == PIPELINE_HANDLE_INVALID)
@@ -564,8 +543,11 @@ void Client_Update(f32 delta_time)
     if (g_client.fov_dirty)
     {
         Fov_Compute(&g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y, FOV_RADIUS);
+        Fog_OnVisibilityChanged(g_client.player_target_pos_x, g_client.player_target_pos_y);
         g_client.fov_dirty = false;
     }
+
+    Fog_Update(delta_time);
 
     update_player(delta_time);
     update_camera(delta_time);
@@ -785,20 +767,15 @@ static void update_camera(f32 delta_time)
 static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
-    vec3 fov_origin = tile_center(g_client.player_target_pos_x, g_client.player_target_pos_y);
     fog_mask_push_constant_t fog_mask_push_constant = {
         .tear_depth = FOG_TEAR_DEPTH,
         .edge_softness = FOG_EDGE_SOFTNESS,
         .transition = fog_transition(),
-        .origin_x = fov_origin.X,
-        .origin_z = fov_origin.Z,
-        .radial_sweep_radius = FOG_RADIAL_SWEEP_RADIUS,
     };
 
     Renderer_ClearBufferObject(g_client.floor_sbo);
     Renderer_ClearBufferObject(g_client.wall_sbo);
-    Renderer_ClearBufferObject(g_client.fog_mask_floor_sbo);
-    Renderer_ClearBufferObject(g_client.fog_mask_wall_sbo);
+    Renderer_ClearBufferObject(g_client.fog_mask_sbo);
 
     mat4 floor_scale = HMM_Scale(V3(1.0f, 1.0f, 1.0f));
     mat4 floor_rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
@@ -806,6 +783,9 @@ static void draw_grid(void)
 
     mat4 wall_scale = HMM_Scale(V3(1.0f, WALL_HEIGHT, 1.0f));
     u64  wall_instance_count = 0;
+
+    fog_mask_instance_t mask_instances[FOG_MAX_TILE_INSTANCES];
+    u64  mask_instance_count = 0;
 
     // TODO: this can be heavily optimized
     i32 start_x =   ClampBot(0, g_client.player_pos_x - 20);
@@ -822,8 +802,10 @@ static void draw_grid(void)
                 continue;
 
             vec3 floor_center = tile_center(x, y);
-            u32 visibility = visibility_bits(x, y);
-            u32 previous = previous_visibility_bits(x, y);
+
+            u32 mask_count = Fog_WriteInstances(x, y, floor_center, mask_instances);
+            Renderer_PushBufferObject(g_client.fog_mask_sbo, mask_instances, mask_count * sizeof(fog_mask_instance_t));
+            mask_instance_count += mask_count;
 
             if (tile->type == TILE_WALL)
             {
@@ -836,15 +818,6 @@ static void draw_grid(void)
                     .color = WALL_COLOR,
                 };
                 Renderer_PushBufferObject(g_client.wall_sbo, &instance, sizeof(instance));
-
-                fog_mask_instance_t mask_instance = {
-                    .transform = instance.transform,
-                    .tile_x = x,
-                    .tile_y = y,
-                    .visibility = visibility,
-                    .previous = previous,
-                };
-                Renderer_PushBufferObject(g_client.fog_mask_wall_sbo, &mask_instance, sizeof(mask_instance));
                 wall_instance_count++;
             }
             else
@@ -858,15 +831,6 @@ static void draw_grid(void)
                     .color = ((x + y) & 1) ? FLOOR_TILE_COLOR_A : FLOOR_TILE_COLOR_B,
                 };
                 Renderer_PushBufferObject(g_client.floor_sbo, &instance, sizeof(instance));
-
-                fog_mask_instance_t mask_instance = {
-                    .transform = instance.transform,
-                    .tile_x = x,
-                    .tile_y = y,
-                    .visibility = visibility,
-                    .previous = previous,
-                };
-                Renderer_PushBufferObject(g_client.fog_mask_floor_sbo, &mask_instance, sizeof(mask_instance));
                 floor_instance_count++;
             }
         }
@@ -887,76 +851,8 @@ static void draw_grid(void)
     Renderer_DrawMeshInstanced(g_client.fog_mask_pass,
         g_client.fog_mask_pipeline,
         &fog_mask_push_constant,
-        g_client.fog_mask_floor_sbo,
-        floor_instance_count, g_client.quad_mesh);
-
-    Renderer_DrawMeshInstanced(g_client.fog_mask_pass,
-        g_client.fog_mask_pipeline,
-        &fog_mask_push_constant,
-        g_client.fog_mask_wall_sbo,
-        wall_instance_count, g_client.cube_mesh);
-}
-
-static u32 visibility_bits(i32 x, i32 y)
-{
-    const level_t *level = &g_client.level;
-    bool wall = Level_GetTile(level, x, y)->type == TILE_WALL;
-    u32 bits = 0;
-
-    for (i32 dy = -1; dy <= 1; dy++)
-    {
-        for (i32 dx = -1; dx <= 1; dx++)
-        {
-            u32 bit = (u32)((dy + 1) * 3 + (dx + 1));
-
-            if (!Level_InBounds(level, x + dx, y + dy))
-            {
-                bits |= 1u << (FOG_VOID_SHIFT + bit);
-                continue;
-            }
-
-            const tile_t *tile = Level_GetTile(level, x + dx, y + dy);
-            if ((tile->flags & FLAG_VISIBLE) && (!wall || tile->type == TILE_WALL))
-                bits |= 1u << bit;
-            if (!(tile->flags & FLAG_REVEALED) || tile->type == TILE_EMPTY)
-                bits |= 1u << (FOG_VOID_SHIFT + bit);
-        }
-    }
-
-    return bits;
-}
-
-static u32 previous_visibility_bits(i32 x, i32 y)
-{
-    const level_t *level = &g_client.level;
-    bool wall = Level_GetTile(level, x, y)->type == TILE_WALL;
-    u32 bits = 0;
-
-    for (i32 dy = -1; dy <= 1; dy++)
-    {
-        for (i32 dx = -1; dx <= 1; dx++)
-        {
-            u32 bit = (u32)((dy + 1) * 3 + (dx + 1));
-
-            if (!Level_InBounds(level, x + dx, y + dy))
-            {
-                bits |= 1u << (FOG_VOID_SHIFT + bit);
-                continue;
-            }
-
-            u16 flags = g_client.previous_flags[(y + dy) * level->width + (x + dx)];
-            u16 type = Level_GetTile(level, x + dx, y + dy)->type;
-            if ((flags & FLAG_VISIBLE) && (!wall || type == TILE_WALL))
-                bits |= 1u << bit;
-            if (!(flags & FLAG_REVEALED) || type == TILE_EMPTY)
-                bits |= 1u << (FOG_VOID_SHIFT + bit);
-        }
-    }
-
-    if (g_client.previous_flags[y * level->width + x] & FLAG_REVEALED)
-        bits |= 1u << FOG_PREVIOUSLY_KNOWN_BIT;
-
-    return bits;
+        g_client.fog_mask_sbo,
+        mask_instance_count, g_client.quad_mesh);
 }
 
 static f32 fog_transition(void)
@@ -965,15 +861,6 @@ static f32 fog_transition(void)
         return 1.0f;
 
     return Min(g_client.player_anim_progress, 1.0f);
-}
-
-static void snapshot_tile_flags(void)
-{
-    const level_t *level = &g_client.level;
-    u64 tile_count = (u64)level->width * level->height;
-
-    for (u64 i = 0; i < tile_count; i++)
-        g_client.previous_flags[i] = level->tiles[i].flags;
 }
 
 static void draw_player(void)
@@ -1094,7 +981,7 @@ static bool player_attempt_move(i32 dx, i32 dy)
 
         client->player_target_pos_x = new_x;
         client->player_target_pos_y = new_y;
-        snapshot_tile_flags();
+        Fog_Snapshot();
         client->fov_dirty = true;
         client->player_anim = PLAYER_ANIM_MOVE;
         client->step_count++;
@@ -1120,8 +1007,7 @@ static void handle_level_init(const event_level_init_t *init)
     client_t *client = &g_client;
 
     Level_Init(&client->level, client->run_arena, init->level_width, init->level_height);
-    client->previous_flags = arena_push_array(client->run_arena, u16,
-                                              (u64)init->level_width * init->level_height);
+    Fog_Reset(&client->level, client->run_arena);
 
     client->move_pending = false;
     client->fov_dirty = true;
