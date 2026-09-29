@@ -3,6 +3,7 @@
 #include "core_math.h"
 #include "core_string.h"
 #include "log.h"
+#include "engine_debug_category.h"
 #include "memory_arena.h"
 
 #include "model_internal.h"
@@ -168,7 +169,7 @@ bool ModelInstance_PlayAnimationS(model_instance_handle_t instance, model_animat
     instance->anim_from_mesh = animation->keyframes[0].mesh;
     instance->anim_to_mesh = animation->keyframes[1].mesh;
 
-    Log(DEBUG, "playing animation %S (%.2fx)", animation->name, playback_speed);
+    DEBUG(ANIMATION, "playing animation %S (%.2fx)", animation->name, playback_speed);
 
     return true;
 }

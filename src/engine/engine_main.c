@@ -1,6 +1,7 @@
 #include "core.h"
 #include "core_string.h"
 #include "log.h"
+#include "engine_debug_category.h"
 #include "memory_arena.h"
 #include "os_time.h"
 
@@ -94,7 +95,7 @@ void Engine_Destroy(void)
 
 void Engine_HandleResize(u32 width, u32 height)
 {
-    Log(DEBUG, "window resized to %ux%u", width, height);
+    DEBUG(RENDERER, "window resized to %ux%u", width, height);
 
     Renderer_HandleResize(width, height);
 

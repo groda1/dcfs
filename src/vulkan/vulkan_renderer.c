@@ -3,6 +3,7 @@
 
 #include "core.h"
 #include "log.h"
+#include "engine_debug_category.h"
 #include "platform_vulkan.h"
 
 #include "vulkan_context.h"
@@ -396,7 +397,7 @@ static bool create_swapchain(bool vsync)
         extent = capabilities.currentExtent;
     }
 
-    Log(DEBUG, "extent %u, %u", extent.width, extent.height);
+    DEBUG(RENDERER, "extent %u, %u", extent.width, extent.height);
 
     /* verify image count. maxImageCount == 0 is a special case meaning "no upper limit", not
        a limit of zero - drivers (e.g. Intel's) commonly report this. */
@@ -451,7 +452,7 @@ static bool create_swapchain(bool vsync)
         return false;
     }
 
-    Log(INFO, "swapchain image count: %d", image_count);
+    DEBUG(RENDERER, "swapchain image count: %d", image_count);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
@@ -596,7 +597,7 @@ static bool create_instance()
     extensions[extension_count++] = "VK_EXT_debug_utils";
 #endif
     for (u32 i = 0; i < extension_count; i++)
-        Log(DEBUG, "required extension: %s", extensions[i]);
+        DEBUG(RENDERER, "required extension: %s", extensions[i]);
 
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -619,7 +620,7 @@ static bool create_instance()
     static const char *validation_layer[] = {"VK_LAYER_KHRONOS_validation"};
     if (query_instance_layer_support(string_lit("VK_LAYER_KHRONOS_validation")))
     {
-        Log(DEBUG, "Enabling layer: VK_LAYER_KHRONOS_validation.");
+        DEBUG(RENDERER, "Enabling layer: VK_LAYER_KHRONOS_validation.");
         create_info_debug = (VkDebugUtilsMessengerCreateInfoEXT){
             .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
@@ -729,12 +730,12 @@ static bool setup_physical_device()
     };
 
     vkGetPhysicalDeviceQueueFamilyProperties(g_physical_device, &family_count, family_properties);
-    Log(DEBUG, "queue family count: %d", family_count);
+    DEBUG(RENDERER, "queue family count: %d", family_count);
 
     for (u32 i = 0; i < family_count; i++)
     {
         VkQueueFamilyProperties prop = family_properties[i];
-        Log(DEBUG, "queue family %d: queue_count=%d gfx=%d transfer=%d compute=%d",
+        DEBUG(RENDERER, "queue family %d: queue_count=%d gfx=%d transfer=%d compute=%d",
             i, prop.queueCount,
             (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0,
             (prop.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0,
@@ -805,7 +806,7 @@ static bool setup_physical_device()
         Log(ERROR, "failed to find all requried devices queues");
         return false;
     }
-    Log(DEBUG, "Queues: gfx=%d [%d] transfer=%d [%d] compute=%d [%d] present=%d [%d]",
+    DEBUG(RENDERER, "Queues: gfx=%d [%d] transfer=%d [%d] compute=%d [%d] present=%d [%d]",
         queue_families.graphics_family_index,
         queue_families.graphics_queue_index,
         queue_families.transfer_family_index,
@@ -856,7 +857,7 @@ static bool create_logical_device()
             };
             queue_creates[queue_create_count++] = create_info;
 
-            Log(DEBUG, "VkDeviceQueueCreateInfo = {.queueFamilyIndex=%d .queueCount=%d}",
+            DEBUG(RENDERER, "VkDeviceQueueCreateInfo = {.queueFamilyIndex=%d .queueCount=%d}",
                 create_info.queueFamilyIndex, create_info.queueCount);
         }
     }
@@ -1003,7 +1004,7 @@ static void log_instance_layer_properties()
         if (count == 0)
             Log(WARNING, "No available instance layers");
         else
-            Log(DEBUG, "Available instance layers:");
+            DEBUG(RENDERER, "Available instance layers:");
 
         for (u32 i = 0; i < count; i++)
         {
@@ -1011,7 +1012,7 @@ static void log_instance_layer_properties()
             VkExtensionProperties properties[MAX_PROPERTY_COUNT];
             u32 property_count = MAX_PROPERTY_COUNT;
 
-            Log(DEBUG, " - %s [%d.%d.%d] - %s",
+            DEBUG(RENDERER, " - %s [%d.%d.%d] - %s",
                 layer->layerName,
                 VK_API_VERSION_MAJOR(layer->specVersion),
                 VK_API_VERSION_MINOR(layer->specVersion),
@@ -1026,7 +1027,7 @@ static void log_instance_layer_properties()
                 {
                     VkExtensionProperties *property = &properties[j];
 
-                    Log(DEBUG, "       %s [%d.%d.%d]",
+                    DEBUG(RENDERER, "       %s [%d.%d.%d]",
                         property->extensionName,
                         VK_API_VERSION_MAJOR(property->specVersion),
                         VK_API_VERSION_MINOR(property->specVersion),
@@ -1068,7 +1069,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     switch (messageSeverity)
     {
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-        Log(DEBUG, "%s %s", type, pCallbackData->pMessage);
+        DEBUG(VALIDATION, "%s %s", type, pCallbackData->pMessage);
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
         Log(WARNING, "%s %s", type, pCallbackData->pMessage);

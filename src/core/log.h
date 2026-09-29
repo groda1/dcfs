@@ -3,7 +3,6 @@
 
 #include "core.h"
 #include "core_string.h"
-#include "memory_arena.h"
 
 typedef enum
 {
@@ -20,20 +19,6 @@ typedef struct
     string text;
 } log_entry_t;
 
-typedef struct
-{
-    arena_t *arena;
-    bool stdout;
-
-    // Entry store
-    log_entry_t *entries;
-    u64 capacity;
-    u64 mask;
-    u64 head;
-    u64 tail;
-    u64 total;
-
-} log_t;
 
 void Log_Init(void);
 void Log_Destroy(void);
@@ -45,14 +30,26 @@ u64 Log_Total();
 log_entry_t *Log_Get(u64 index);
 
 
+void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ...);
+
 #ifdef DEBUG_BUILD
+void Log_AddDebugCategory(string name, u16 category, bool enabled);
+void Log_SetDebugCategory(u16 category, bool enabled);
+bool Log_DebugLogEnabled(u16 category);
 
-typedef u16 debug_log_category_t;
-void Log_SetDebugCategory(debug_log_category_t category, bool enabled);
-
-void _DebugLog(debug_log_category_t category, const char *log, ...);
-
-#endif
+#define DEBUG(cat, ...)                                                \
+  do                                                                   \
+  {                                                                    \
+      if (Log_DebugLogEnabled(cat))                                    \
+          _DebugLogImpl((cat), __FILE__, __LINE__, __VA_ARGS__);       \
+    } while (0)
+#else
+#define DEBUG(cat, ...)                                                \
+    do {                                                               \
+        if (0)                                                         \
+            _DebugLogImpl((cat), __FILE__, __LINE__, __VA_ARGS__);     \
+    } while (0)
+#endif // DEBUG_BUILD
 
 
 #endif

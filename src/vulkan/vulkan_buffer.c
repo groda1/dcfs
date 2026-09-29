@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "log.h"
+#include "engine_debug_category.h"
 
 #include "memory_arena.h"
 #include "render_types.h"
@@ -298,7 +299,7 @@ bool VulkanBuffer_PushObjectData(buffer_object_handle_t handle, const void *data
             Log(ERROR, "buffer object data exceeds capacity (%ju > %ju)", object->cpu_buf_len + size, object->capacity);
             return false;
         }
-        Log(DEBUG, "grew cpu buffer sbo=%u newsize=%u", handle, object->capacity);
+        DEBUG(RENDERER, "grew cpu buffer sbo=%u newsize=%u", handle, object->capacity);
     }
 
     MemoryCopy(object->cpu_buf + object->cpu_buf_len, data, size);
@@ -373,7 +374,7 @@ bool VulkanBuffer_BakeCommandBuffer(VkCommandBuffer command_buffer, u32 image_in
                 return false;
             }
 
-            Log(DEBUG, "buffer object %u grown to %ju bytes", i + 1, bo->capacity);
+            DEBUG(RENDERER, "buffer object %u grown to %ju bytes", i + 1, bo->capacity);
         }
 
         VkBuffer staging_buffer = bo->staging_buffers[image_index];

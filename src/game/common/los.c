@@ -1,5 +1,6 @@
 #include "los.h"
 #include "log.h"
+#include "debug_category.h"
 #include "os_time.h"
 #include "rules.h"
 
@@ -68,7 +69,7 @@ void LoS_Init(los_t *los, arena_t *arena, i32 radius)
 
     Assert(los->cell_count == cell_count);
 
-    Log(DEBUG, "los: radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
+    DEBUG(LOS, "radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
         radius, tree.ray_count, los->cell_count,
         (u32)(los->cell_count * sizeof(los_cell_t)),
         (u32)(tree.node_capacity * sizeof(los_node_t)),

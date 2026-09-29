@@ -3,6 +3,7 @@
 #include "core.h"
 #include "core_math.h"
 #include "log.h"
+#include "debug_category.h"
 
 #include "client.h"
 #include "engine_types.h"
@@ -460,7 +461,7 @@ void Client_HandleKeyDown(key_code_t key)
 
     if (key == KEY_F12)
     {
-        Log(DEBUG, "toggle pause");
+        DEBUG(CLIENT, "toggle pause");
         client->paused = !client->paused;
     }
 
@@ -615,7 +616,7 @@ static void update_player_move(f32 delta_time)
         client->player_pos_x = client->player_target_pos_x;
         client->player_pos_y = client->player_target_pos_y;
         client->player_anim = PLAYER_ANIM_NONE;
-        Log(DEBUG, "move complete %d,%d", client->player_pos_x, client->player_pos_y);
+        DEBUG(CLIENT, "move complete %d,%d", client->player_pos_x, client->player_pos_y);
     }
 }
 

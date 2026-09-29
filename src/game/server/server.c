@@ -5,6 +5,7 @@
 #include "level.h"
 #include "level_gen.h"
 #include "log.h"
+#include "debug_category.h"
 #include "memory_arena.h"
 #include "rng.h"
 #include "rules.h"
@@ -46,7 +47,8 @@ bool Server_Init(u64 seed)
     server->outbox = ArrayQueue_Create(server->arena, sizeof(event_t), OUTBOX_CAPACITY);
     LoS_Init(&server->los, server->arena, LOS_RADIUS);
     Rng_Seed(&server->rng, seed);
-    Log(INFO, "server seed=%lu", seed);
+
+    DEBUG(SERVER, "server seed=%lu", seed);
 
     Level_Init(&server->level, server->run_arena, LEVEL_WIDTH, LEVEL_HEIGHT);
 
@@ -163,7 +165,7 @@ static void handle_move(const command_move_t *move)
 
     if (!valid_step || !Rules_IsWalkable(&server->level, x, y))
     {
-        Log(DEBUG, "server: rejected move d=%d,%d", move->dx, move->dy);
+        DEBUG(SERVER, "rejected move d=%d,%d", move->dx, move->dy);
         return;
     }
 

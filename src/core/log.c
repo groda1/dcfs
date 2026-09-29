@@ -7,6 +7,38 @@
 #define LOG_CAPACITY        8192
 #define MAX_ENTRY_LENGTH    256
 
+#ifdef DEBUG_BUILD
+
+typedef struct
+{
+    string name;
+    bool enabled;
+} debug_category_setting_t;
+
+#define MAX_DEBUG_CATEGORIES    256
+
+#endif // DEBUG_BUILD
+
+typedef struct
+{
+    arena_t *arena;
+    bool stdout;
+
+    // Entry store
+    log_entry_t *entries;
+    u64 capacity;
+    u64 mask;
+    u64 head;
+    u64 tail;
+    u64 total;
+
+#ifdef DEBUG_BUILD
+    debug_category_setting_t debug_categories[MAX_DEBUG_CATEGORIES];
+#endif
+
+} log_t;
+
+
 static log_t *s_logger = NULL;
 
 StaticAssert(IsPow2(LOG_CAPACITY), "bad capacity");
@@ -122,3 +154,63 @@ log_entry_t *Log_Get(u64 index)
 
     return &s_logger->entries[i];
 }
+
+#ifdef DEBUG_BUILD
+void Log_AddDebugCategory(string name, u16 category, bool enabled)
+{
+    Assert(category < MAX_DEBUG_CATEGORIES);
+
+    s_logger->debug_categories[category] = (debug_category_setting_t){
+        .name = string_clone(s_logger->arena, name),
+        .enabled = enabled,
+    };
+}
+
+void Log_SetDebugCategory(u16 category, bool enabled)
+{
+    Assert(category < MAX_DEBUG_CATEGORIES);
+
+    s_logger->debug_categories[category].enabled = enabled;
+}
+
+bool Log_DebugLogEnabled(u16 category)
+{
+    if (!s_logger || category >= MAX_DEBUG_CATEGORIES)
+        return false;
+
+    return s_logger->debug_categories[category].enabled;
+}
+
+void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ...)
+{
+    if (!s_logger)
+        return;
+
+    const char *file_name = file;
+    for (const char *c = file; *c; c++)
+    {
+        if (*c == '/' || *c == '\\')
+            file_name = c + 1;
+    }
+
+    u64 pos = MemoryArena_Pos(s_logger->arena);
+
+    va_list args;
+    va_start(args, fmt);
+    string message = string_fmtv(s_logger->arena, fmt, args);
+    va_end(args);
+
+    Log(DEBUG, "[%s] %s (%s:%d)",
+        s_logger->debug_categories[category].name.str, message.str, file_name, line);
+
+    MemoryArena_PopTo(s_logger->arena, pos);
+}
+#else
+void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ...)
+{
+    (void)category;
+    (void)file;
+    (void)line;
+    (void)fmt;
+}
+#endif // DEBUG_BUILD

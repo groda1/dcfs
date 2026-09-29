@@ -2,6 +2,7 @@
 #include "core.h"
 #include "core_math.h"
 #include "log.h"
+#include "engine_debug_category.h"
 #include "platform.h"
 #include "render_types.h"
 #include "renderer.h"
@@ -200,7 +201,7 @@ key_handle_result_t Console_HandleKeyDown(key_code_t key)
             }
             default:
             {
-                Log(DEBUG, "console undhandled keycode: %u", key);
+                DEBUG(CONSOLE, "console undhandled keycode: %u", key);
                 return KEY_EVENT_CONSUMED;
             }
         }

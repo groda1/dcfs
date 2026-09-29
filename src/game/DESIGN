@@ -933,6 +933,26 @@ write-masked. The mixed write masks need the independentBlend device
 feature, which is now enabled.
 
 
+DECIDED: debug log categories
+-----------------------------
+
+DEBUG(category, ...) logs are grouped into named categories that can
+be toggled at runtime. The category ids are application specific, so
+core never defines any: core only stores a table of 256 slots (name +
+enabled) and compiles DEBUG() away in release builds. Each layer
+declares its own enum. The engine's is in
+engine/engine_debug_category.h (renderer, model, animation, console,
+validation) and starts at 0. The game's is in
+common/debug_category.h (protocol, client, server, los, level_gen) and
+starts at GAME_DEBUG_CATEGORY_FIRST (64). game_main registers all of
+them at startup, and a static assert keeps the engine range below 64.
+Core's own debug logs (memory arenas) stay plain Log(DEBUG) because
+core has no categories.
+
+The format strings go through core's own formatter, which has %S and
+%v3, so _DebugLogImpl has no printf format attribute.
+
+
 MILESTONE 3 (agreed): monster, FOV, fog of war
 ----------------------------------------------
 

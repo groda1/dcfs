@@ -3,24 +3,43 @@
 #include "os_time.h"
 
 #include "client.h"
+#include "debug_category.h"
 #include "engine_main.h"
 #include "game_main.h"
 #include "platform.h"
 #include "protocol.h"
 #include "server.h"
 
+
 static void pump(void);
+
+#ifdef DEBUG_BUILD
+
+#include "debug_category.h"
+#include "engine_debug_category.h"
+
+static void add_debug_categories(void);
+
+
+#endif
 
 bool Game_Init(platform_window_t *window)
 {
+#ifdef DEBUG_BUILD
+    StaticAssert(ENGINE_DEBUG_CATEGORY_COUNT <= GAME_DEBUG_CATEGORY_FIRST,
+             "engine debug categories overlap the game's");
+
+    add_debug_categories();
+#endif
+
     if (!Engine_Init(window))
         return false;
 
     if (!Client_Init())
         goto error_engine;
 
-    //if (!Server_Init(OS_TimeNowNs()))
-    if (!Server_Init(123456))
+    if (!Server_Init(OS_TimeNowNs()))
+    //if (!Server_Init(123456))
         goto error_client;
 
     return true;
@@ -77,3 +96,20 @@ static void pump(void)
     while (Server_PollEvent(&event))
         Client_HandleEvent(&event);
 }
+
+#ifdef DEBUG_BUILD
+static void add_debug_categories(void)
+{
+
+    Log_AddDebugCategory(string_lit("renderer"), RENDERER, false);
+    Log_AddDebugCategory(string_lit("model"), MODEL, false);
+    Log_AddDebugCategory(string_lit("animation"), ANIMATION, false);
+    Log_AddDebugCategory(string_lit("console"), CONSOLE, true);
+    Log_AddDebugCategory(string_lit("validation"), VALIDATION, true);
+    Log_AddDebugCategory(string_lit("protocol"), PROTOCOL, false);
+    Log_AddDebugCategory(string_lit("client"), CLIENT, true);
+    Log_AddDebugCategory(string_lit("server"), SERVER, true);
+    Log_AddDebugCategory(string_lit("los"), LOS, true);
+    Log_AddDebugCategory(string_lit("level_gen"), LEVEL_GEN, true);
+}
+#endif
