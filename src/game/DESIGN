@@ -220,8 +220,8 @@ path, the Blender export script, the segmented human with idle / walk_r /
 walk_l / attack / bump, and per-instance playback speed. DEFERRED: the
 runtime half of anchoring. Anchor names and per-keyframe transforms are
 exported and loaded, but nothing interpolates them yet and no weapon is
-drawn in the hand. The design below still stands; pick it up when
-equipment first needs to be visible.
+drawn in the hand. The design below still stands. Milestone 3 picks it
+up.
 
 The grid sandbox's player cube becomes an animated human model holding
 a weapon. Work: the .frog loader, the two-buffer morph-animation path
@@ -618,8 +618,13 @@ far from it and the motion reads wrong. The API exists so a gameplay retune
 does not force a re-export, not so one clip can cover 0.1 s and 1.0 s.
 
 
-MILESTONE 2 (next): one room, walking cube
+MILESTONE 2 (done): one room, walking cube
 ------------------------------------------
+
+Declared done 2026-09-29. It went well past the goal: level gen, LoS,
+fog of war (sight) and client prediction are all in. Still open from
+it: the diagonal-gap LoS question (below), and the server seed is
+temporarily hard-coded in game_main.c instead of taken from the clock.
 
 Protocol message structs + the local message pump + a server that
 generates one room and resolves moves + the client walking a cube
@@ -977,7 +982,69 @@ custom %S and %v3 specifiers are gone; use STR_FMT/STR_ARG(s) and
 V2_FMT..V4_FMT/V2_ARG..V4_ARG(v) instead.
 
 
-MILESTONE 3 (agreed): monster, FOV, fog of war
+MILESTONE 3 (agreed): model viewer and runtime anchoring
+--------------------------------------------------------
+
+Agreed 2026-09-29. Implement the runtime half of anchoring (deferred
+from milestone 1), and build a debug model viewer in the engine to
+verify it.
+
+The model viewer:
+  - An engine debug tool that can be opened while the game is running.
+    It exists in debug builds only (decided).
+  - Full-screen takeover (decided): while it is open it replaces the
+    game view. The game keeps ticking underneath but isn't shown, and
+    the viewer takes all input.
+  - Lists every model currently loaded in the engine. Select one and
+    rotate it freely.
+  - Lists the selected model's anchors. Any other loaded model can be
+    attached to an anchor.
+  - Lists the selected model's animations. Any of them can be played,
+    with an animation speed multiplier.
+  - Mouse controlled (decided). The platform has no mouse input yet, so
+    this milestone adds mouse events to the platform layer: motion,
+    buttons, wheel. That means the SDL backend and the (still
+    uncompiled) win32 backend.
+
+Runtime anchoring (decided: attach in the engine):
+  - ModelInstance_Attach(parent, anchor, child) attaches a model
+    instance to a named anchor of another instance. Drawing the parent
+    also draws what is attached to it, with the transform
+    parent_transform * interpolated_anchor_transform. Call sites don't
+    compose transforms themselves.
+  - The anchor pose is interpolated with the same mix factor as the
+    vertices: lerp the position, slerp the orientation (see milestone
+    1).
+
+Also decided (proposed by me, confirmed 2026-09-29):
+  - F2 toggles the viewer (F1 is the console, F12 is the client's
+    pause).
+  - The engine keeps a registry of loaded models (Frog_LoadModel
+    registers each one, named after its file). That is what the
+    viewer lists.
+  - The viewer draws its own instances of the selected model and its
+    attachments. Playing an animation or attaching something in the
+    viewer never affects the game's instances.
+  - The engine gets its own simple model pipeline and shader for the
+    viewer. The game's frog_player pipeline also writes the sight mask,
+    so it can't be reused as is.
+  - One attachment per anchor. Attaching again replaces it, and a
+    detach call clears it.
+  - Something must load sword.frog for there to be anything to attach.
+    The client could load it now, since it will be the first weapon.
+
+Build order (agreed), so each step can be checked on its own:
+  1. Anchoring in the engine, no UI: model registry, anchor
+     interpolation, ModelInstance_Attach. Check it in-game with the
+     sword in the player's hand.
+  2. Mouse input in the platform layer.
+  3. Viewer shell: F2 toggle, full-screen view, own model pipeline,
+     orbit camera, model list.
+  4. Viewer contents: animations (play, speed multiplier) and anchors
+     (attach, detach).
+
+
+MILESTONE 4 (agreed): monster, FOV, fog of war
 ----------------------------------------------
 
 A simple monster that wanders the level, plus FOV and fog of war.
