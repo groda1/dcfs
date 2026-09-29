@@ -5,6 +5,7 @@
 
 #define LOS_RAYS_PER_TILE   8
 #define LOS_DIAMOND_RADIUS  0.5f
+#define LOS_DIAMOND_MARGIN  1e-4f
 #define LOS_START_REACH     0.48f
 #define LOS_NO_NODE         0xFFFFFFFFu
 
@@ -262,7 +263,7 @@ static bool passes_diamond(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
         closest = Min(closest, diamond_distance(start_x, start_y, delta_x, delta_y, t, center_x, center_y));
     }
 
-    return closest < LOS_DIAMOND_RADIUS;
+    return closest < LOS_DIAMOND_RADIUS + LOS_DIAMOND_MARGIN;
 }
 
 static f32 diamond_distance(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,

@@ -6,7 +6,7 @@
 
 #include "client.h"
 #include "engine_types.h"
-#include "fog.h"
+#include "sight.h"
 #include "los.h"
 #include "level.h"
 #include "memory_arena.h"
@@ -26,8 +26,8 @@
 #define RENDER_WIDTH                (640 * 1)
 #define RENDER_HEIGHT               (360 * 1)
 
-#define FOG_BRIGHTNESS              0.25f
-#define FOG_DESATURATION            0.8f
+#define REMEMBERED_BRIGHTNESS              0.25f
+#define REMEMBERED_DESATURATION            0.8f
 
 #define PLAYER_SCALE                1.0f
 #define PLAYER_MOVE_SPEED           7.0f
@@ -75,11 +75,9 @@ StaticAssert(sizeof(tile_instance_t) == 80, "quad_instance_t must match the shad
 typedef struct
 {
     sbo_push_constant_t sbo;
-    f32 tear_depth;
-    f32 edge_softness;
     f32 transition;
     f32 pad;
-} fog_mask_push_constant_t;
+} sight_mask_push_constant_t;
 
 typedef struct
 {
@@ -87,10 +85,10 @@ typedef struct
     vec2 size;
     texture_handle_t color_texture;
     texture_handle_t mask_texture;
-    f32 fog_brightness;
-    f32 fog_desaturation;
-} fog_post_instance_t;
-StaticAssert(sizeof(fog_post_instance_t) == 32, "fog_post_instance_t must match the shader's std430 stride");
+    f32 remembered_brightness;
+    f32 remembered_desaturation;
+} sight_post_instance_t;
+StaticAssert(sizeof(sight_post_instance_t) == 32, "sight_post_instance_t must match the shader's std430 stride");
 
 typedef enum
 {
@@ -123,9 +121,9 @@ typedef struct
     mesh_handle_t screen_quad_mesh;
 
     texture_handle_t scene_texture;
-    texture_handle_t fog_mask_texture;
+    texture_handle_t sight_mask_texture;
     renderpass_handle_t scene_pass;
-    renderpass_handle_t fog_mask_pass;
+    renderpass_handle_t sight_mask_pass;
     model_handle_t player_model;
     model_instance_handle_t player_model_instance;
     model_animation_handle_t player_walk_l_anim;
@@ -140,11 +138,11 @@ typedef struct
 
     pipeline_handle_t player_pipeline;
 
-    pipeline_handle_t fog_mask_pipeline;
-    buffer_object_handle_t fog_mask_sbo;
+    pipeline_handle_t sight_mask_pipeline;
+    buffer_object_handle_t sight_mask_sbo;
 
-    pipeline_handle_t fog_post_pipeline;
-    buffer_object_handle_t fog_post_sbo;
+    pipeline_handle_t sight_post_pipeline;
+    buffer_object_handle_t sight_post_sbo;
 
     buffer_object_handle_t vp_uniform;
 
@@ -200,8 +198,8 @@ static camera_rig_t camera_rig_for(camera_mode_t mode, f32 aspect);
 static void camera_set_mode(camera_mode_t mode);
 static void draw_grid(void);
 static void draw_player(void);
-static void draw_fog_post(void);
-static f32  fog_transition(void);
+static void draw_sight_post(void);
+static f32  sight_transition(void);
 static vec3 tile_center(i32 x, i32 y);
 static vec3 player_center(i32 x, i32 y);
 static f32  wrap_angle_deg(f32 angle);
@@ -219,7 +217,7 @@ bool Client_Init(void)
     g_client.arena = MemoryArena_Create("client-arena");
     g_client.run_arena = MemoryArena_Create("client-run-arena");
     g_client.outbox = ArrayQueue_Create(g_client.arena, sizeof(command_t), OUTBOX_CAPACITY);
-    Fog_Init(g_client.arena, WALL_HEIGHT);
+    Sight_Init(WALL_HEIGHT);
     LoS_Init(&g_client.los, g_client.arena, LOS_RADIUS);
 
     g_client.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
@@ -235,20 +233,20 @@ bool Client_Init(void)
 
     g_client.scene_texture = Renderer_CreateRenderTexture(RENDER_WIDTH, RENDER_HEIGHT,
                                                           RENDER_TEXTURE_FORMAT_SRGB, sampler);
-    g_client.fog_mask_texture = Renderer_CreateRenderTexture(RENDER_WIDTH, RENDER_HEIGHT,
+    g_client.sight_mask_texture = Renderer_CreateRenderTexture(RENDER_WIDTH, RENDER_HEIGHT,
                                                              RENDER_TEXTURE_FORMAT_UNORM, sampler);
     if (g_client.scene_texture == TEXTURE_HANDLE_INVALID ||
-        g_client.fog_mask_texture == TEXTURE_HANDLE_INVALID)
+        g_client.sight_mask_texture == TEXTURE_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create render textures");
         goto error;
     }
 
-    renderpass_config_t fog_mask_pass_config = {
+    renderpass_config_t sight_mask_pass_config = {
         .order = 0,
         .target_count = 1,
         .targets = {
-            { .texture = g_client.fog_mask_texture, .load = RENDER_TARGET_CLEAR },
+            { .texture = g_client.sight_mask_texture, .load = RENDER_TARGET_CLEAR },
         },
     };
     renderpass_config_t scene_pass_config = {
@@ -256,13 +254,13 @@ bool Client_Init(void)
         .target_count = 2,
         .targets = {
             { .texture = g_client.scene_texture, .load = RENDER_TARGET_CLEAR },
-            { .texture = g_client.fog_mask_texture, .load = RENDER_TARGET_LOAD },
+            { .texture = g_client.sight_mask_texture, .load = RENDER_TARGET_LOAD },
         },
     };
-    g_client.fog_mask_pass = Renderer_CreateRenderPass(&fog_mask_pass_config);
+    g_client.sight_mask_pass = Renderer_CreateRenderPass(&sight_mask_pass_config);
     g_client.scene_pass = Renderer_CreateRenderPass(&scene_pass_config);
     if (g_client.scene_pass == RENDERPASS_HANDLE_INVALID ||
-        g_client.fog_mask_pass == RENDERPASS_HANDLE_INVALID)
+        g_client.sight_mask_pass == RENDERPASS_HANDLE_INVALID)
     {
         Log(ERROR, "failed to create render passes");
         goto error;
@@ -349,11 +347,11 @@ bool Client_Init(void)
         goto error;
     }
 
-    pipeline_config_t fog_mask_pipeline_config = {
-        .name = "fog-mask",
-        .vertex_shader = Renderer_LoadShader("shaders/fog_mask.vert.spv"),
-        .fragment_shader = Renderer_LoadShader("shaders/fog_mask.frag.spv"),
-        .push_constant_size = sizeof(fog_mask_push_constant_t),
+    pipeline_config_t sight_mask_pipeline_config = {
+        .name = "sight-mask",
+        .vertex_shader = Renderer_LoadShader("shaders/sight_mask.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/sight_mask.frag.spv"),
+        .push_constant_size = sizeof(sight_mask_push_constant_t),
         .vertex_layout = &VERTEX_LAYOUT_NORMAL,
         .uniform_binding_count = 1,
         .uniform_bindings = {
@@ -364,29 +362,29 @@ bool Client_Init(void)
             },
         },
     };
-    g_client.fog_mask_sbo = Renderer_CreateStorageBuffer(KB(256));
+    g_client.sight_mask_sbo = Renderer_CreateStorageBuffer(KB(256));
 
-    g_client.fog_mask_pipeline = Renderer_AddPipeline(g_client.fog_mask_pass, &fog_mask_pipeline_config);
-    if (g_client.fog_mask_pipeline == PIPELINE_HANDLE_INVALID)
+    g_client.sight_mask_pipeline = Renderer_AddPipeline(g_client.sight_mask_pass, &sight_mask_pipeline_config);
+    if (g_client.sight_mask_pipeline == PIPELINE_HANDLE_INVALID)
     {
-        Log(ERROR, "failed to create fog mask pipeline");
+        Log(ERROR, "failed to create sight mask pipeline");
         goto error;
     }
 
-    pipeline_config_t fog_post_pipeline_config = {
-        .name = "fog-post",
-        .vertex_shader = Renderer_LoadShader("shaders/fog_post.vert.spv"),
-        .fragment_shader = Renderer_LoadShader("shaders/fog_post.frag.spv"),
+    pipeline_config_t sight_post_pipeline_config = {
+        .name = "sight-post",
+        .vertex_shader = Renderer_LoadShader("shaders/sight_post.vert.spv"),
+        .fragment_shader = Renderer_LoadShader("shaders/sight_post.frag.spv"),
         .push_constant_size = sizeof(tile_push_constant_t),
         .vertex_layout = &VERTEX_LAYOUT_TEXTURED,
         .disable_depth_test = true,
     };
-    g_client.fog_post_sbo = Renderer_CreateStorageBuffer(sizeof(fog_post_instance_t));
+    g_client.sight_post_sbo = Renderer_CreateStorageBuffer(sizeof(sight_post_instance_t));
 
-    g_client.fog_post_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &fog_post_pipeline_config);
-    if (g_client.fog_post_pipeline == PIPELINE_HANDLE_INVALID)
+    g_client.sight_post_pipeline = Renderer_AddPipeline(SWAPCHAIN_PASS_HANDLE, &sight_post_pipeline_config);
+    if (g_client.sight_post_pipeline == PIPELINE_HANDLE_INVALID)
     {
-        Log(ERROR, "failed to create fog post pipeline");
+        Log(ERROR, "failed to create sight post pipeline");
         goto error;
     }
 
@@ -545,11 +543,8 @@ void Client_Update(f32 delta_time)
     if (g_client.los_dirty)
     {
         LoS_Compute(&g_client.los, &g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y);
-        Fog_OnVisibilityChanged(g_client.player_target_pos_x, g_client.player_target_pos_y);
         g_client.los_dirty = false;
     }
-
-    Fog_Update(delta_time);
 
     update_player(delta_time);
     update_camera(delta_time);
@@ -557,7 +552,7 @@ void Client_Update(f32 delta_time)
 draw:
     draw_grid();
     draw_player();
-    draw_fog_post();
+    draw_sight_post();
 }
 
 void Client_HandleEvent(const event_t *event)
@@ -769,15 +764,13 @@ static void update_camera(f32 delta_time)
 static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
-    fog_mask_push_constant_t fog_mask_push_constant = {
-        .tear_depth = FOG_TEAR_DEPTH,
-        .edge_softness = FOG_EDGE_SOFTNESS,
-        .transition = fog_transition(),
+    sight_mask_push_constant_t sight_mask_push_constant = {
+        .transition = sight_transition(),
     };
 
     Renderer_ClearBufferObject(g_client.floor_sbo);
     Renderer_ClearBufferObject(g_client.wall_sbo);
-    Renderer_ClearBufferObject(g_client.fog_mask_sbo);
+    Renderer_ClearBufferObject(g_client.sight_mask_sbo);
 
     mat4 floor_scale = HMM_Scale(V3(1.0f, 1.0f, 1.0f));
     mat4 floor_rotation = HMM_Rotate_RH(HMM_AngleDeg(-90), V3(1.0f, 0.0f, 0.0f));
@@ -786,7 +779,7 @@ static void draw_grid(void)
     mat4 wall_scale = HMM_Scale(V3(1.0f, WALL_HEIGHT, 1.0f));
     u64  wall_instance_count = 0;
 
-    fog_mask_instance_t mask_instances[FOG_MAX_TILE_INSTANCES];
+    sight_mask_instance_t mask_instances[SIGHT_MAX_TILE_INSTANCES];
     u64  mask_instance_count = 0;
 
     // TODO: this can be heavily optimized
@@ -805,8 +798,8 @@ static void draw_grid(void)
 
             vec3 floor_center = tile_center(x, y);
 
-            u32 mask_count = Fog_WriteInstances(x, y, floor_center, mask_instances);
-            Renderer_PushBufferObject(g_client.fog_mask_sbo, mask_instances, mask_count * sizeof(fog_mask_instance_t));
+            u32 mask_count = Sight_WriteInstances(x, y, floor_center, mask_instances);
+            Renderer_PushBufferObject(g_client.sight_mask_sbo, mask_instances, mask_count * sizeof(sight_mask_instance_t));
             mask_instance_count += mask_count;
 
             if (tile->type == TILE_WALL)
@@ -850,14 +843,14 @@ static void draw_grid(void)
         g_client.wall_sbo,
         wall_instance_count, g_client.cube_mesh);
 
-    Renderer_DrawMeshInstanced(g_client.fog_mask_pass,
-        g_client.fog_mask_pipeline,
-        &fog_mask_push_constant,
-        g_client.fog_mask_sbo,
+    Renderer_DrawMeshInstanced(g_client.sight_mask_pass,
+        g_client.sight_mask_pipeline,
+        &sight_mask_push_constant,
+        g_client.sight_mask_sbo,
         mask_instance_count, g_client.quad_mesh);
 }
 
-static f32 fog_transition(void)
+static f32 sight_transition(void)
 {
     if (g_client.player_anim != PLAYER_ANIM_MOVE)
         return 1.0f;
@@ -879,7 +872,7 @@ static void draw_player(void)
                        g_client.player_pipeline, transform);
 }
 
-static void draw_fog_post(void)
+static void draw_sight_post(void)
 {
     window_extent_t extent = Renderer_GetWindowExtent();
 
@@ -887,24 +880,24 @@ static void draw_fog_post(void)
     if (scale < 1)
         scale = 1;
 
-    fog_post_instance_t instance = {
+    sight_post_instance_t instance = {
         .position = V2(0.0f, 0.0f),
         .size = V2(2.0f * (f32)(RENDER_WIDTH * scale) / (f32)extent.width,
                    2.0f * (f32)(RENDER_HEIGHT * scale) / (f32)extent.height),
         .color_texture = g_client.scene_texture,
-        .mask_texture = g_client.fog_mask_texture,
-        .fog_brightness = FOG_BRIGHTNESS,
-        .fog_desaturation = FOG_DESATURATION,
+        .mask_texture = g_client.sight_mask_texture,
+        .remembered_brightness = REMEMBERED_BRIGHTNESS,
+        .remembered_desaturation = REMEMBERED_DESATURATION,
     };
 
-    Renderer_ClearBufferObject(g_client.fog_post_sbo);
-    Renderer_PushBufferObject(g_client.fog_post_sbo, &instance, sizeof(instance));
+    Renderer_ClearBufferObject(g_client.sight_post_sbo);
+    Renderer_PushBufferObject(g_client.sight_post_sbo, &instance, sizeof(instance));
 
     tile_push_constant_t push_constant = {};
     Renderer_DrawMeshInstanced(SWAPCHAIN_PASS_HANDLE,
-        g_client.fog_post_pipeline,
+        g_client.sight_post_pipeline,
         &push_constant,
-        g_client.fog_post_sbo,
+        g_client.sight_post_sbo,
         1, g_client.screen_quad_mesh);
 }
 
@@ -983,7 +976,6 @@ static bool player_attempt_move(i32 dx, i32 dy)
 
         client->player_target_pos_x = new_x;
         client->player_target_pos_y = new_y;
-        Fog_Snapshot();
         client->los_dirty = true;
         client->player_anim = PLAYER_ANIM_MOVE;
         client->step_count++;
@@ -1009,7 +1001,7 @@ static void handle_level_init(const event_level_init_t *init)
     client_t *client = &g_client;
 
     Level_Init(&client->level, client->run_arena, init->level_width, init->level_height);
-    Fog_Reset(&client->level, client->run_arena);
+    Sight_Reset(&client->level);
 
     client->move_pending = false;
     client->los_dirty = true;

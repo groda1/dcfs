@@ -7,7 +7,7 @@ layout(set = 0, binding = 0) uniform sampler2D textures[];
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 1) flat in uint colorTexture;
 layout(location = 2) flat in uint maskTexture;
-layout(location = 3) flat in vec2 fogParams;
+layout(location = 3) flat in vec2 rememberedLook;
 
 layout(location = 0) out vec4 outColor;
 
@@ -18,7 +18,7 @@ void main() {
     float known = mask.g;
 
     float luminance = dot(color, vec3(0.30, 0.59, 0.11));
-    vec3 fogged = mix(color, vec3(luminance), fogParams.y) * fogParams.x;
+    vec3 remembered = mix(color, vec3(luminance), rememberedLook.y) * rememberedLook.x;
 
-    outColor = vec4(mix(fogged, color, lit) * known, 1.0);
+    outColor = vec4(mix(remembered, color, lit) * known, 1.0);
 }

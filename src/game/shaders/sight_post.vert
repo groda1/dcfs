@@ -6,8 +6,8 @@ struct instance_data {
     vec2 size;
     uint color_texture;
     uint mask_texture;
-    float fog_brightness;
-    float fog_desaturation;
+    float remembered_brightness;
+    float remembered_desaturation;
 };
 
 layout(std430, buffer_reference) readonly buffer InstanceData {
@@ -24,7 +24,7 @@ layout(location = 1) in vec2 inTexCoord;
 layout(location = 0) out vec2 fragTexCoord;
 layout(location = 1) flat out uint colorTexture;
 layout(location = 2) flat out uint maskTexture;
-layout(location = 3) flat out vec2 fogParams;
+layout(location = 3) flat out vec2 rememberedLook;
 
 void main() {
     instance_data instance = pc.instance_data.instances[gl_InstanceIndex];
@@ -34,5 +34,5 @@ void main() {
     fragTexCoord = inTexCoord;
     colorTexture = instance.color_texture;
     maskTexture = instance.mask_texture;
-    fogParams = vec2(instance.fog_brightness, instance.fog_desaturation);
+    rememberedLook = vec2(instance.remembered_brightness, instance.remembered_desaturation);
 }
