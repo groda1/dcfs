@@ -829,10 +829,40 @@ DECIDED: rendering: fog of war
 ------------------------------
 
 Clean per-tile fog, like DCSS (decided 2026-09-29): a surface is either
-lit or remembered, with a crisp edge at the tile border. There are no
-edge effects and no transitions. Every change shows instantly. The user
-plans a map-like style for remembered areas later, inside the tiles
-rather than at their edges.
+lit or remembered, with a crisp edge at the tile border, and no edge
+effects. The user plans a map-like style for remembered areas later,
+inside the tiles rather than at their edges.
+
+Transitions (decided 2026-09-29): nothing travels across the map, so
+floors, wall tops and wall sides can't drift apart. They run on the
+sight module's own clock (advanced by the slowed game time), not on the
+walk animation.
+  - First reveal (a tile becomes known: void -> lit, and also void ->
+    remembered for the ring of tiles around the view): the tile
+    dissolves in through world-space noise over SIGHT_REVEAL_TIME
+    (0.4 s). All newly revealed tiles do it at the same time. Each
+    pixel snaps from black to shown. A per-pixel soft fade was tried and
+    looked bad. A newly revealed tile dissolves into the REMEMBERED look
+    first (lit 0). If visible, its fade to lit is timed to END with the
+    dissolve, so the two overlap during the last SIGHT_FADE_TIME.
+    Dissolving straight from black to full colour looked harsh, and
+    fading only after the dissolve felt too slow.
+    The dissolve noise is coarse: two layers weighted to the big one,
+    blotches of about half a tile rather than fine grain.
+    Glowing dissolve edge (being tried): pixels the dissolve has just
+    reached glow, fading out over REVEAL_GLOW_WIDTH (0.12) of the noise.
+    The glow is written to the mask's blue channel, and the post pass
+    adds it as a warm tint (REVEAL_GLOW_COLOR). The dissolve is scaled so
+    the last glow has faded by the end of SIGHT_REVEAL_TIME. Both
+    constants live in the shaders.
+  - Lit <-> remembered, on an already known tile: its lit value fades
+    over SIGHT_FADE_TIME (0.15 s). A change mid-fade continues from the
+    current value, so nothing jumps.
+  - The sight module keeps one record per tile in the run arena (known,
+    lit, fade start value and time, reveal time). On each LoS change it
+    compares against the level flags. Each surface instance carries its
+    tile's current lit value and reveal progress. A wall's top and sides
+    share one record, so they always change together.
 
 Three passes:
   1. sight mask (image pass, order 0): the world's surfaces, into
@@ -842,17 +872,16 @@ Three passes:
      a top quad plus one quad per side, not as a cube. The scene still
      draws cubes, and the two geometries match. Each quad instance
      (sight_mask_instance_t, built by the client's sight module,
-     client/sight.c, including its transform) carries flags: bit 0 lit,
-     bit 1 hidden, bits [2..3] known mode. The mask's red channel is
-     lit, green is known (black when 0).
+     client/sight.c, including its transform) carries the tile's current
+     lit value, its reveal progress, and a hidden flag. The mask's red
+     channel is lit, green is known (black when 0).
        - A floor or a wall top is lit when its tile is visible. A wall
          side is lit exactly when its wall is visible, so a lit top
          never has an unlit side.
        - A side facing an unknown tile (unrevealed, TILE_EMPTY or off the
          map) is hidden: known 0, so it shows black.
-       - Known mode DISSOLVE (a world-noise dissolve driven by the walk
-         progress t) is unused. It is kept for a future "reveal all"
-         command, which should appear that way (user).
+       - The reveal dissolve is also meant for a future "reveal all"
+         command (user): it can just set the reveal time on every tile.
   2. scene (image pass, order 1, TWO targets): the sRGB 640x360 scene
      color (cleared), plus the sight mask LOADED from pass 1. Tile
      pipelines write only the color target. Entities write both, i.e.

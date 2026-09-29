@@ -5,7 +5,9 @@
 struct instance_data {
     mat4 transform;
     uint flags;
-    uint pad[3];
+    float lit;
+    float reveal;
+    uint pad;
 };
 
 layout(std430, buffer_reference) readonly buffer InstanceData {
@@ -14,8 +16,6 @@ layout(std430, buffer_reference) readonly buffer InstanceData {
 
 layout(push_constant) uniform pushConstants {
     InstanceData instance_data;
-    float transition;
-    float pad;
 } pc;
 
 layout(location = 0) in vec3 worldPosition;
@@ -23,10 +23,8 @@ layout(location = 1) flat in uint instanceIndex;
 
 layout(location = 0) out vec4 outMask;
 
-const uint LIT_BIT = 0u;
-const uint HIDDEN_BIT = 1u;
-const uint KNOWN_SHIFT = 2u;
-const uint KNOWN_FULL = 1u;
+const uint HIDDEN_BIT = 0u;
+const float REVEAL_GLOW_WIDTH = 0.12;
 
 float hash(vec3 p) {
     p = fract(p * 0.3183099 + 0.1);
@@ -46,22 +44,23 @@ float value_noise(vec3 p) {
 }
 
 float dissolve_noise(vec3 p) {
-    return 0.5 * value_noise(p * 2.0)
-         + 0.3 * value_noise(p * 5.0)
-         + 0.2 * value_noise(p * 11.0);
+    return 0.75 * value_noise(p * 2.0)
+         + 0.25 * value_noise(p * 5.0);
 }
 
 void main() {
-    uint flags = pc.instance_data.instances[instanceIndex].flags;
+    instance_data inst = pc.instance_data.instances[instanceIndex];
 
-    float lit = (flags & (1u << LIT_BIT)) != 0u ? 1.0 : 0.0;
+    float front = inst.reveal * (1.0 + REVEAL_GLOW_WIDTH);
+    float behind = front - dissolve_noise(worldPosition);
+    float known = inst.reveal >= 1.0 ? 1.0 : step(0.0, behind);
+    float glow = inst.reveal >= 1.0 ? 0.0 : known * (1.0 - clamp(behind / REVEAL_GLOW_WIDTH, 0.0, 1.0));
 
-    float t = clamp(pc.transition, 0.0, 1.0);
-    uint known_mode = (flags >> KNOWN_SHIFT) & 3u;
-    float known = (known_mode == KNOWN_FULL || t >= 1.0) ? 1.0 : step(dissolve_noise(worldPosition), t);
-
-    if ((flags & (1u << HIDDEN_BIT)) != 0u)
+    if ((inst.flags & (1u << HIDDEN_BIT)) != 0u)
+    {
         known = 0.0;
+        glow = 0.0;
+    }
 
-    outMask = vec4(lit, known, 0.0, 1.0);
+    outMask = vec4(inst.lit, known, glow, 1.0);
 }

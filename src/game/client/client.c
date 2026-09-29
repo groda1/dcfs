@@ -74,13 +74,6 @@ StaticAssert(sizeof(tile_instance_t) == 80, "quad_instance_t must match the shad
 
 typedef struct
 {
-    sbo_push_constant_t sbo;
-    f32 transition;
-    f32 pad;
-} sight_mask_push_constant_t;
-
-typedef struct
-{
     vec2 position;
     vec2 size;
     texture_handle_t color_texture;
@@ -199,7 +192,6 @@ static void camera_set_mode(camera_mode_t mode);
 static void draw_grid(void);
 static void draw_player(void);
 static void draw_sight_post(void);
-static f32  sight_transition(void);
 static vec3 tile_center(i32 x, i32 y);
 static vec3 player_center(i32 x, i32 y);
 static f32  wrap_angle_deg(f32 angle);
@@ -351,7 +343,7 @@ bool Client_Init(void)
         .name = "sight-mask",
         .vertex_shader = Renderer_LoadShader("shaders/sight_mask.vert.spv"),
         .fragment_shader = Renderer_LoadShader("shaders/sight_mask.frag.spv"),
-        .push_constant_size = sizeof(sight_mask_push_constant_t),
+        .push_constant_size = sizeof(tile_push_constant_t),
         .vertex_layout = &VERTEX_LAYOUT_NORMAL,
         .uniform_binding_count = 1,
         .uniform_bindings = {
@@ -543,8 +535,11 @@ void Client_Update(f32 delta_time)
     if (g_client.los_dirty)
     {
         LoS_Compute(&g_client.los, &g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y);
+        Sight_OnVisibilityChanged();
         g_client.los_dirty = false;
     }
+
+    Sight_Update(delta_time);
 
     update_player(delta_time);
     update_camera(delta_time);
@@ -764,9 +759,6 @@ static void update_camera(f32 delta_time)
 static void draw_grid(void)
 {
     tile_push_constant_t push_constant = {};
-    sight_mask_push_constant_t sight_mask_push_constant = {
-        .transition = sight_transition(),
-    };
 
     Renderer_ClearBufferObject(g_client.floor_sbo);
     Renderer_ClearBufferObject(g_client.wall_sbo);
@@ -845,17 +837,9 @@ static void draw_grid(void)
 
     Renderer_DrawMeshInstanced(g_client.sight_mask_pass,
         g_client.sight_mask_pipeline,
-        &sight_mask_push_constant,
+        &push_constant,
         g_client.sight_mask_sbo,
         mask_instance_count, g_client.quad_mesh);
-}
-
-static f32 sight_transition(void)
-{
-    if (g_client.player_anim != PLAYER_ANIM_MOVE)
-        return 1.0f;
-
-    return Min(g_client.player_anim_progress, 1.0f);
 }
 
 static void draw_player(void)
@@ -1001,7 +985,7 @@ static void handle_level_init(const event_level_init_t *init)
     client_t *client = &g_client;
 
     Level_Init(&client->level, client->run_arena, init->level_width, init->level_height);
-    Sight_Reset(&client->level);
+    Sight_Reset(&client->level, client->run_arena);
 
     client->move_pending = false;
     client->los_dirty = true;

@@ -1,14 +1,6 @@
 #include "sight.h"
 
-#define SIGHT_LIT_BIT                 0
-#define SIGHT_HIDDEN_BIT              1
-#define SIGHT_KNOWN_SHIFT             2
-
-typedef enum
-{
-    SIGHT_KNOWN_DISSOLVE,
-    SIGHT_KNOWN_FULL,
-} sight_known_t;
+#define SIGHT_HIDDEN_BIT              0
 
 typedef enum
 {
@@ -21,8 +13,19 @@ typedef enum
 
 typedef struct
 {
+    bool known;
+    bool lit;
+    f32 lit_from;
+    f32 lit_time;
+    f32 reveal_time;
+} sight_tile_t;
+
+typedef struct
+{
     const level_t *level;
+    sight_tile_t *tiles;
     f32 wall_height;
+    f32 clock;
 } sight_t;
 
 static sight_t g_sight;
@@ -35,7 +38,8 @@ static bool tile_known(i32 x, i32 y);
 static bool tile_wall(i32 x, i32 y);
 static bool tile_visible(i32 x, i32 y);
 static bool face_exists(i32 x, i32 y, sight_side_t side);
-static bool surface_lit(i32 x, i32 y, u32 surface);
+static f32  displayed_lit(const sight_tile_t *tile);
+static f32  displayed_reveal(const sight_tile_t *tile);
 static void write_surface(i32 x, i32 y, u32 surface, mat4 transform, sight_mask_instance_t *instance);
 
 void Sight_Init(f32 wall_height)
@@ -43,9 +47,47 @@ void Sight_Init(f32 wall_height)
     g_sight.wall_height = wall_height;
 }
 
-void Sight_Reset(const level_t *level)
+void Sight_Reset(const level_t *level, arena_t *run_arena)
 {
     g_sight.level = level;
+    g_sight.tiles = arena_push_array(run_arena, sight_tile_t, (u64)level->width * level->height);
+    g_sight.clock = 0.0f;
+}
+
+void Sight_OnVisibilityChanged(void)
+{
+    sight_t *sight = &g_sight;
+    const level_t *level = sight->level;
+
+    for (i32 y = 0; y < level->height; y++)
+    {
+        for (i32 x = 0; x < level->width; x++)
+        {
+            sight_tile_t *tile = &sight->tiles[y * level->width + x];
+            bool known = tile_known(x, y);
+            bool lit = tile_visible(x, y);
+
+            if (known && !tile->known)
+            {
+                tile->known = true;
+                tile->reveal_time = sight->clock;
+                tile->lit = lit;
+                tile->lit_from = 0.0f;
+                tile->lit_time = sight->clock + SIGHT_REVEAL_TIME - SIGHT_FADE_TIME;
+            }
+            else if (lit != tile->lit)
+            {
+                tile->lit_from = displayed_lit(tile);
+                tile->lit = lit;
+                tile->lit_time = sight->clock;
+            }
+        }
+    }
+}
+
+void Sight_Update(f32 delta_time)
+{
+    g_sight.clock += delta_time;
 }
 
 u32 Sight_WriteInstances(i32 x, i32 y, vec3 center, sight_mask_instance_t *instances)
@@ -110,21 +152,27 @@ static bool face_exists(i32 x, i32 y, sight_side_t side)
     return tile_wall(x, y) && !tile_wall(x + SIDE_DX[side], y + SIDE_DY[side]);
 }
 
-static bool surface_lit(i32 x, i32 y, u32 surface)
+static f32 displayed_lit(const sight_tile_t *tile)
 {
-    if (surface == 0)
-        return tile_visible(x, y);
+    f32 progress = Clamp(0.0f, (g_sight.clock - tile->lit_time) / SIGHT_FADE_TIME, 1.0f);
+    f32 target = tile->lit ? 1.0f : 0.0f;
+    return tile->lit_from + (target - tile->lit_from) * progress;
+}
 
-    return face_exists(x, y, (sight_side_t)(surface - 1)) && tile_visible(x, y);
+static f32 displayed_reveal(const sight_tile_t *tile)
+{
+    return Clamp(0.0f, (g_sight.clock - tile->reveal_time) / SIGHT_REVEAL_TIME, 1.0f);
 }
 
 static void write_surface(i32 x, i32 y, u32 surface, mat4 transform, sight_mask_instance_t *instance)
 {
-    *instance = (sight_mask_instance_t){ .transform = transform };
+    const sight_tile_t *tile = &g_sight.tiles[y * g_sight.level->width + x];
 
-    if (surface_lit(x, y, surface))
-        instance->flags |= 1u << SIGHT_LIT_BIT;
-    instance->flags |= (u32)SIGHT_KNOWN_FULL << SIGHT_KNOWN_SHIFT;
+    *instance = (sight_mask_instance_t){
+        .transform = transform,
+        .lit = displayed_lit(tile),
+        .reveal = displayed_reveal(tile),
+    };
 
     if (surface != 0)
     {

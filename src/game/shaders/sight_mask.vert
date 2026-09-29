@@ -4,7 +4,9 @@
 struct instance_data {
     mat4 transform;
     uint flags;
-    uint pad[3];
+    float lit;
+    float reveal;
+    uint pad;
 };
 
 layout(std430, buffer_reference) readonly buffer InstanceData {
@@ -18,8 +20,6 @@ layout(set = 1, binding = 0) uniform UniformBufferObject {
 
 layout(push_constant) uniform pushConstants {
     InstanceData instance_data;
-    float transition;
-    float pad;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

@@ -11,14 +11,17 @@ layout(location = 3) flat in vec2 rememberedLook;
 
 layout(location = 0) out vec4 outColor;
 
+const vec3 REVEAL_GLOW_COLOR = vec3(1.0, 0.75, 0.45) * 0.6;
+
 void main() {
     vec3 color = texture(textures[nonuniformEXT(colorTexture)], fragTexCoord).rgb;
-    vec2 mask = texture(textures[nonuniformEXT(maskTexture)], fragTexCoord).rg;
+    vec3 mask = texture(textures[nonuniformEXT(maskTexture)], fragTexCoord).rgb;
     float lit = mask.r;
     float known = mask.g;
+    float glow = mask.b;
 
     float luminance = dot(color, vec3(0.30, 0.59, 0.11));
     vec3 remembered = mix(color, vec3(luminance), rememberedLook.y) * rememberedLook.x;
 
-    outColor = vec4(mix(remembered, color, lit) * known, 1.0);
+    outColor = vec4(mix(remembered, color, lit) * known + REVEAL_GLOW_COLOR * glow, 1.0);
 }
