@@ -129,8 +129,10 @@ static void reveal_visible(void)
             if (tile->flags & FLAG_REVEALED)
                 continue;
 
-            /* also reveal tiles that borders a visible tile */
-            if (!(tile->flags & FLAG_VISIBLE) && !LoS_TouchesVisibleOpenTile(level, x, y))
+            // /* also reveal tiles that borders a visible tile */
+            // if (!(tile->flags & FLAG_VISIBLE) && !LoS_TouchesVisibleOpenTile(level, x, y))
+            //     continue;
+            if (!(tile->flags & FLAG_VISIBLE))
                 continue;
 
             tile->flags |= FLAG_REVEALED;
