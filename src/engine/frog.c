@@ -4,6 +4,7 @@
 
 #include "HandmadeMath.h"
 #include "core.h"
+#include "core_math.h"
 #include "core_string.h"
 #include "engine_debug_category.h"
 #include "log.h"
@@ -13,6 +14,8 @@
 #include "mesh_internal.h"
 #include "model_internal.h"
 #include "vulkan_buffer.h"
+
+#define DEBUG_CATEGORY  DEBUG_CAT_MODEL
 
 #define MAGIC 0x4C444F4D474F5246 // "FROGMODL" little endian
 extern arena_t *g_engine_arena;
@@ -92,7 +95,7 @@ model_handle_t Frog_LoadModel(const char *path)
         goto exit;
     }
 
-    DEBUG(MODEL, "read frog header from file: %s { magic=%lX version=%u tri=%u mat=%u anchors=%u anims=%u",
+    DEBUG("read frog header from file: %s { magic=%lX version=%u tri=%u mat=%u anchors=%u anims=%u",
         path, header.magic, header.version, header.triangle_count, header.material_count, header.anchor_count, header.animation_count);
 
     if (header.magic != MAGIC)
@@ -136,8 +139,8 @@ model_handle_t Frog_LoadModel(const char *path)
         if (!read_vec3(&material->specular_color, file))
             goto fail;
 
-        DEBUG(MODEL, "read material name=%S base=%v3 spec=%v3", material->name, material->base_color,
-            material->specular_color);
+        DEBUG("read material name=" STR_FMT " base=" V3_FMT " spec=" V3_FMT, STR_ARG(material->name),
+            V3_ARG(material->base_color), V3_ARG(material->specular_color));
     }
 
     // Triangle material index
@@ -152,7 +155,7 @@ model_handle_t Frog_LoadModel(const char *path)
         *ptr = read_string(g_engine_arena, file);
         if (!ptr->len)
             goto fail;
-        DEBUG(MODEL, "read anchor name: %S", *ptr);
+        DEBUG("read anchor name: " STR_FMT, STR_ARG(*ptr));
     }
 
     u32 index_count = header.triangle_count * 3;
@@ -167,7 +170,7 @@ model_handle_t Frog_LoadModel(const char *path)
     // Animations
     for (u32 anim_idx = 0; anim_idx < model->animation_count; anim_idx++)
     {
-        DEBUG(MODEL, "anim %u", anim_idx);
+        DEBUG("anim %u", anim_idx);
         model_animation_t *animation = &model->animations[anim_idx];
 
         animation->name = read_string(g_engine_arena, file);
@@ -179,11 +182,11 @@ model_handle_t Frog_LoadModel(const char *path)
 
         if (animation->keyframe_count == 0)
         {
-            Log(ERROR, "animation %S has no keyframes", animation->name);
+            Log(ERROR, "animation " STR_FMT " has no keyframes", STR_ARG(animation->name));
             goto fail;
         }
 
-        DEBUG(MODEL, "read animation header (%S, keyframes=%u)", animation->name, animation->keyframe_count);
+        DEBUG("read animation header (" STR_FMT ", keyframes=%u)", STR_ARG(animation->name), animation->keyframe_count);
 
         animation->keyframes = arena_push_array(g_engine_arena, model_keyframe_t, animation->keyframe_count);
 
@@ -193,7 +196,7 @@ model_handle_t Frog_LoadModel(const char *path)
 
             if (!fread(&keyframe->time_s, sizeof(f32), 1, file))
                 goto fail;
-            DEBUG(MODEL, "read anim=%u keyframe %u time=%f", anim_idx, key_idx, keyframe->time_s);
+            DEBUG("read anim=%u keyframe %u time=%f", anim_idx, key_idx, keyframe->time_s);
 
             normal_material_vertex_t *vertex_data = arena_push_array(g_scratch, normal_material_vertex_t, header.triangle_count * 3);
             for (u32 tri_idx =0; tri_idx < header.triangle_count; tri_idx++)
@@ -219,7 +222,7 @@ model_handle_t Frog_LoadModel(const char *path)
                 v0->material = triangle_materials[tri_idx];
                 v1->material = triangle_materials[tri_idx];
                 v2->material = triangle_materials[tri_idx];
-                //DEBUG(MODEL, "read triangle keyframe=%u: %v3 %v3 %v3 normal=%v3", key_idx, v0->position, v1->position, v2->position, normal);
+                //DEBUG("read triangle keyframe=%u: " V3_FMT " " V3_FMT " " V3_FMT " normal=" V3_FMT, key_idx, V3_ARG(v0->position), V3_ARG(v1->position), V3_ARG(v2->position), V3_ARG(normal));
             }
 
             VkBuffer vertex_buffer = VulkanBuffer_CreateStaticVertex(
@@ -232,7 +235,7 @@ model_handle_t Frog_LoadModel(const char *path)
             mesh->index_buffer = index_buffer;
             mesh->index_count = index_count;
 
-            DEBUG(MODEL, "created mesh vertex=%u index=%u count=%u", mesh->vertex_buffer, mesh->index_buffer, mesh->index_count);
+            DEBUG("created mesh vertex=%p index=%p count=%u", (void *)mesh->vertex_buffer, (void *)mesh->index_buffer, mesh->index_count);
             keyframe->mesh = mesh;
 
 
@@ -244,7 +247,7 @@ model_handle_t Frog_LoadModel(const char *path)
                     goto fail;
                 if (!read_quat(&anchor->orientation, file))
                     goto fail;
-                DEBUG(MODEL, "read anchor keyframe=%u: %v3 %v4", key_idx, anchor->pos, anchor->orientation);
+                DEBUG("read anchor keyframe=%u: " V3_FMT " " V4_FMT, key_idx, V3_ARG(anchor->pos), V4_ARG(anchor->orientation));
             }
         }
     }

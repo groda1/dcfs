@@ -91,6 +91,7 @@ typedef double      f64;
 // Attributes
 #define AttributePacked         __attribute__((packed))
 #define AttributeMaybeUnused    __attribute_maybe_unused__
+#define AttributePrintf(f, a)   __attribute__((format(printf, f, a)))
 
 // Assert
 #define StaticAssert            static_assert

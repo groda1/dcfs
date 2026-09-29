@@ -15,6 +15,13 @@ typedef HMM_Vec4 vec4;
 typedef HMM_Mat4 mat4;
 typedef HMM_Quat quat;
 
+#define V2_FMT      "[%.3f, %.3f]"
+#define V3_FMT      "[%.3f, %.3f, %.3f]"
+#define V4_FMT      "[%.3f, %.3f, %.3f, %.3f]"
+#define V2_ARG(v)   (f64)(v).X, (f64)(v).Y
+#define V3_ARG(v)   (f64)(v).X, (f64)(v).Y, (f64)(v).Z
+#define V4_ARG(v)   (f64)(v).X, (f64)(v).Y, (f64)(v).Z, (f64)(v).W
+
 #define lerp HMM_Lerp
 
 inline f32 smoothstep(f32 t) { return t * t * (3.0f - 2.0f * t); }

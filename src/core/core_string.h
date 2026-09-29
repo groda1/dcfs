@@ -26,13 +26,16 @@ typedef struct
 
 #define string_lit(S)  string_from_l((const char*)(S), sizeof(S) - 1)
 
+#define STR_FMT        "%.*s"
+#define STR_ARG(s)     (int)(s).len, (const char *)(s).str
+
 inline string string_empty() { return (string){}; }
 string string_new(arena_t *arena, u64 capacity);
 string string_from_l(const char *str, u64 len);
 string string_from(const char *str);
 
-string string_fmt(arena_t *arena, const char *fmt, ...);
-string string_fmtv(arena_t *arena, const char *fmt, va_list args);
+string string_fmt(arena_t *arena, const char *fmt, ...) AttributePrintf(2, 3);
+string string_fmtv(arena_t *arena, const char *fmt, va_list args) AttributePrintf(2, 0);
 string string_fmt_a(arena_t arena, string *s, ...);
 
 bool string_match(string s1, string s2);

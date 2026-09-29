@@ -23,6 +23,7 @@ typedef struct
 {
     arena_t *arena;
     bool stdout;
+    bool busy;
 
     // Entry store
     log_entry_t *entries;
@@ -45,7 +46,7 @@ StaticAssert(IsPow2(LOG_CAPACITY), "bad capacity");
 
 static const char *const severity_map[] =
     {
-        [DEBUG] = "DEBUG",
+        [DEBUG_OUTPUT] = "DEBUG",
         [INFO] = "INFO",
         [WARNING] = "WARNING",
         [ERROR] = "ERROR",
@@ -77,6 +78,10 @@ void Log_Init(void)
     }
 
     s_logger = l;
+
+#ifdef DEBUG_BUILD
+    Log_AddDebugCategory(string_lit("arena"), DEBUG_CAT_ARENA, true);
+#endif
 }
 
 void Log_Destroy(void)
@@ -89,13 +94,8 @@ void Log_Destroy(void)
     s_logger = NULL;
 }
 
-void Log(log_severity_t severity, const char *log, ...)
+static void push_entry(log_severity_t severity, string text)
 {
-    if (!s_logger)
-        return;
-
-    va_list args;
-
     if (Log_Count() >= (s_logger->capacity - 1))
     {
         s_logger->head++;
@@ -105,21 +105,10 @@ void Log(log_severity_t severity, const char *log, ...)
 
     log_entry_t *entry = &s_logger->entries[s_logger->tail];
 
-    u64 pos = MemoryArena_Pos(s_logger->arena);
-
-    va_start(args, log);
-    string tmp = string_fmtv(s_logger->arena, log, args);
-    va_end(args);
-    string_copy(tmp, &entry->text);
+    string_copy(text, &entry->text);
 
     if (s_logger->stdout)
-    {
-        string stdout_string =
-            string_fmt(s_logger->arena, "[%s] %s", severity_map[severity], tmp.str);
-        printf("%s\n", stdout_string.str);
-    }
-
-    MemoryArena_PopTo(s_logger->arena, pos);
+        printf("[%s] " STR_FMT "\n", severity_map[severity], STR_ARG(text));
 
     entry->severity = severity;
 
@@ -128,6 +117,27 @@ void Log(log_severity_t severity, const char *log, ...)
         s_logger->tail = 0;
 
     s_logger->total++;
+}
+
+void Log(log_severity_t severity, const char *log, ...)
+{
+    if (!s_logger || s_logger->busy)
+        return;
+
+    Assert(severity != DEBUG_OUTPUT);
+
+    s_logger->busy = true;
+    u64 pos = MemoryArena_Pos(s_logger->arena);
+
+    va_list args;
+    va_start(args, log);
+    string text = string_fmtv(s_logger->arena, log, args);
+    va_end(args);
+
+    push_entry(severity, text);
+
+    MemoryArena_PopTo(s_logger->arena, pos);
+    s_logger->busy = false;
 }
 
 u64 Log_Count()
@@ -183,16 +193,10 @@ bool Log_DebugLogEnabled(u16 category)
 
 void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ...)
 {
-    if (!s_logger)
+    if (!s_logger || s_logger->busy)
         return;
 
-    const char *file_name = file;
-    for (const char *c = file; *c; c++)
-    {
-        if (*c == '/' || *c == '\\')
-            file_name = c + 1;
-    }
-
+    s_logger->busy = true;
     u64 pos = MemoryArena_Pos(s_logger->arena);
 
     va_list args;
@@ -200,10 +204,13 @@ void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ..
     string message = string_fmtv(s_logger->arena, fmt, args);
     va_end(args);
 
-    Log(DEBUG, "[%s] %s (%s:%d)",
-        s_logger->debug_categories[category].name.str, message.str, file_name, line);
+    string text = string_fmt(s_logger->arena, "[" STR_FMT "] " STR_FMT " (%s:%d)",
+                             STR_ARG(s_logger->debug_categories[category].name), STR_ARG(message),
+                             file, line);
+    push_entry(DEBUG_OUTPUT, text);
 
     MemoryArena_PopTo(s_logger->arena, pos);
+    s_logger->busy = false;
 }
 #else
 void _DebugLogImpl(u16 category, const char* file, int line, const char* fmt, ...)

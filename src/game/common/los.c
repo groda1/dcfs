@@ -4,6 +4,8 @@
 #include "os_time.h"
 #include "rules.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_LOS
+
 #define LOS_RAYS_PER_TILE   8
 #define LOS_DIAMOND_RADIUS  0.5f
 #define LOS_DIAMOND_MARGIN  1e-4f
@@ -69,7 +71,7 @@ void LoS_Init(los_t *los, arena_t *arena, i32 radius)
 
     Assert(los->cell_count == cell_count);
 
-    DEBUG(LOS, "radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
+    DEBUG("radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
         radius, tree.ray_count, los->cell_count,
         (u32)(los->cell_count * sizeof(los_cell_t)),
         (u32)(tree.node_capacity * sizeof(los_node_t)),

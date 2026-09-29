@@ -936,21 +936,45 @@ feature, which is now enabled.
 DECIDED: debug log categories
 -----------------------------
 
-DEBUG(category, ...) logs are grouped into named categories that can
-be toggled at runtime. The category ids are application specific, so
-core never defines any: core only stores a table of 256 slots (name +
-enabled) and compiles DEBUG() away in release builds. Each layer
-declares its own enum. The engine's is in
-engine/engine_debug_category.h (renderer, model, animation, console,
-validation) and starts at 0. The game's is in
-common/debug_category.h (protocol, client, server, los, level_gen) and
-starts at GAME_DEBUG_CATEGORY_FIRST (64). game_main registers all of
-them at startup, and a static assert keeps the engine range below 64.
-Core's own debug logs (memory arenas) stay plain Log(DEBUG) because
-core has no categories.
+Debug logs are grouped into named categories that can be toggled at
+runtime. Core stores a table of 256 slots (name + enabled) and
+compiles the logs away in release builds, while still type-checking
+them. Each layer declares its own category enum and range:
 
-The format strings go through core's own formatter, which has %S and
-%v3, so _DebugLogImpl has no printf format attribute.
+  core    0..31   core/core_debug_category.h        arena
+  engine  32..63  engine/engine_debug_category.h    renderer, model,
+                                                    animation, console,
+                                                    validation
+  game    64..    common/debug_category.h           protocol, client,
+                                                    server, los,
+                                                    level_gen
+
+Log_Init registers core's categories itself. game_main registers the
+engine's and the game's in one function so they are easy to turn on
+and off in one place (this moves to cvars later). Static asserts in
+game_main keep the ranges from overlapping.
+
+A file picks its category once, with
+#define DEBUG_CATEGORY DEBUG_CAT_<name> after its includes, and then
+calls DEBUG(fmt, ...). A file that needs a second category uses
+DEBUG_CAT(DEBUG_CAT_<name>, fmt, ...) (vulkan_renderer.c for
+validation messages). Headers never call DEBUG(): an inline function
+would take whichever category the including file picked.
+
+There is no DEBUG severity for Log(). Category logs are stored with
+the logger-private severity DEBUG_OUTPUT, so the console can still
+colour them; Log() asserts nobody passes it.
+
+The logger formats into its own arena, and arena growth itself logs
+(arena category). A log call made while another one is in progress is
+therefore dropped (a busy flag in the logger); otherwise a commit
+inside the log arena could recurse until the stack overflows.
+
+Formatting is plain printf, and Log, DEBUG and string_fmt carry the
+printf format attribute so every call is checked by the compiler.
+Turning the checks on found three wrong calls straight away. The old
+custom %S and %v3 specifiers are gone; use STR_FMT/STR_ARG(s) and
+V2_FMT..V4_FMT/V2_ARG..V4_ARG(v) instead.
 
 
 MILESTONE 3 (agreed): monster, FOV, fog of war

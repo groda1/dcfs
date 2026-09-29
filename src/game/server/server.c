@@ -10,6 +10,8 @@
 #include "rng.h"
 #include "rules.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_SERVER
+
 #define LEVEL_WIDTH             256
 #define LEVEL_HEIGHT            128
 
@@ -48,7 +50,7 @@ bool Server_Init(u64 seed)
     LoS_Init(&server->los, server->arena, LOS_RADIUS);
     Rng_Seed(&server->rng, seed);
 
-    DEBUG(SERVER, "server seed=%lu", seed);
+    DEBUG("server seed=%lu", seed);
 
     Level_Init(&server->level, server->run_arena, LEVEL_WIDTH, LEVEL_HEIGHT);
 
@@ -91,7 +93,6 @@ void Server_Destroy(void)
 void Server_HandleCommand(const command_t *command)
 {
     Protocol_LogCommand("server", command);
-
     switch (command->type)
     {
         case COMMAND_MOVE:
@@ -165,7 +166,7 @@ static void handle_move(const command_move_t *move)
 
     if (!valid_step || !Rules_IsWalkable(&server->level, x, y))
     {
-        DEBUG(SERVER, "rejected move d=%d,%d", move->dx, move->dy);
+        DEBUG("rejected move d=%d,%d", move->dx, move->dy);
         return;
     }
 

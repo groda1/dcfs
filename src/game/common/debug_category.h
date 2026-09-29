@@ -5,11 +5,11 @@
 
 typedef enum
 {
-    PROTOCOL = GAME_DEBUG_CATEGORY_FIRST,
-    CLIENT,
-    SERVER,
-    LOS,
-    LEVEL_GEN,
+    DEBUG_CAT_PROTOCOL = GAME_DEBUG_CATEGORY_FIRST,
+    DEBUG_CAT_CLIENT,
+    DEBUG_CAT_SERVER,
+    DEBUG_CAT_LOS,
+    DEBUG_CAT_LEVEL_GEN,
 } game_debug_category_t;
 
 #endif

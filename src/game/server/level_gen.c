@@ -3,6 +3,8 @@
 #include "log.h"
 #include "debug_category.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_LEVEL_GEN
+
 #define MAX_ROOMS           40
 #define ROOM_ATTEMPTS       1000
 #define ROOM_MIN_WIDTH      5
@@ -51,7 +53,7 @@ void LevelGen_Generate(level_t *level, rng_t *rng, i32 *start_x, i32 *start_y)
     *start_x = random_odd_in_room_x(rng, start);
     *start_y = random_odd_in_room_y(rng, start);
 
-    DEBUG(LEVEL_GEN, "%d rooms, start %d,%d", room_count, *start_x, *start_y);
+    DEBUG("%d rooms, start %d,%d", room_count, *start_x, *start_y);
 }
 
 static i32 place_rooms(level_t *level, rng_t *rng, room_t *rooms)

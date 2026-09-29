@@ -11,6 +11,8 @@
 #include "vulkan_memory.h"
 #include "vulkan_types.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_RENDERER
+
 #define MAX_BUFFER_OBJECT   1024
 #define MAX_STATIC_BUFFERS  256
 #define MAX_RETIRED_BUFFERS 64
@@ -299,7 +301,7 @@ bool VulkanBuffer_PushObjectData(buffer_object_handle_t handle, const void *data
             Log(ERROR, "buffer object data exceeds capacity (%ju > %ju)", object->cpu_buf_len + size, object->capacity);
             return false;
         }
-        DEBUG(RENDERER, "grew cpu buffer sbo=%u newsize=%u", handle, object->capacity);
+        DEBUG("grew cpu buffer sbo=%u newsize=%ju", handle, object->capacity);
     }
 
     MemoryCopy(object->cpu_buf + object->cpu_buf_len, data, size);
@@ -374,7 +376,7 @@ bool VulkanBuffer_BakeCommandBuffer(VkCommandBuffer command_buffer, u32 image_in
                 return false;
             }
 
-            DEBUG(RENDERER, "buffer object %u grown to %ju bytes", i + 1, bo->capacity);
+            DEBUG("buffer object %u grown to %ju bytes", i + 1, bo->capacity);
         }
 
         VkBuffer staging_buffer = bo->staging_buffers[image_index];

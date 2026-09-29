@@ -2,6 +2,8 @@
 #include "memory_arena.h"
 #include "os_memory.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_ARENA
+
 #define PAGE_SIZE ((u64)4096)
 
 arena_t *MemoryArena_Create(const char *name)
@@ -37,7 +39,7 @@ arena_t *MemoryArena_CreateP(const char *name, arena_params_t params)
         arena->commited = commit_size;
         arena->reserved = reserve_size;
 
-        Log(DEBUG, "arena %s created (commited=%ju, reserved=%ju)\n", name, commit_size, reserve_size);
+        DEBUG("arena %s created (commited=%ju, reserved=%ju)", name, commit_size, reserve_size);
         return arena;
     }
 
@@ -95,7 +97,7 @@ void *MemoryArena_Push(arena_t *arena, u64 size, u64 align)
 
         OS_MemoryCommit(cmt_ptr, cmt_size);
 
-        Log(DEBUG, "arena %s: commited %ju", current->name, cmt_size);
+        DEBUG("arena %s: commited %ju", current->name, cmt_size);
         current->commited = cmt_pst_clamped;
     }
 
@@ -153,10 +155,10 @@ void MemoryArena_Print(arena_t *arena)
 {
     arena_t * current = arena->current;
 
-    Log(DEBUG, "%s:", current->name);
+    DEBUG("%s:", current->name);
     while (current)
     {
-        Log(DEBUG, "  [reserved=%juKB commit_size=%juKB base_pos=%ju] commited=%juKB pos=%ju",
+        DEBUG("  [reserved=%juKB commit_size=%juKB base_pos=%ju] commited=%juKB pos=%ju",
             current->reserved / KB(1),
             current->commit_size / KB(1),
             current->base_pos,

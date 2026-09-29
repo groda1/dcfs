@@ -8,6 +8,8 @@
 #include "renderer.h"
 #include "draw.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_CONSOLE
+
 #define TOGGLE_SPEED        5.0f
 #define CARET_BLINK_SPEED   1.5f
 #define SCROLL_LINES        15
@@ -133,7 +135,7 @@ void Console_Draw()
 
             switch (log->severity)
             {
-                case DEBUG:
+                case DEBUG_OUTPUT:
                     prefix = string_lit("[debug]");
                     prefix_color = COLOR_TEXT_DEBUG;
                     break;
@@ -201,7 +203,7 @@ key_handle_result_t Console_HandleKeyDown(key_code_t key)
             }
             default:
             {
-                DEBUG(CONSOLE, "console undhandled keycode: %u", key);
+                DEBUG("console undhandled keycode: %u", key);
                 return KEY_EVENT_CONSUMED;
             }
         }

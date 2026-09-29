@@ -19,6 +19,8 @@
 #include "frog.h"
 #include "rules.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_CLIENT
+
 #define FLOOR_TILE_COLOR_A          V4(0.30f, 0.42f, 0.28f, 1.0f)
 #define FLOOR_TILE_COLOR_B          V4(0.23f, 0.35f, 0.22f, 1.0f)
 #define WALL_COLOR                  V4(0.4f, 0.4f, 0.2f, 1.0f)
@@ -461,7 +463,7 @@ void Client_HandleKeyDown(key_code_t key)
 
     if (key == KEY_F12)
     {
-        DEBUG(CLIENT, "toggle pause");
+        DEBUG("toggle pause");
         client->paused = !client->paused;
     }
 
@@ -616,7 +618,7 @@ static void update_player_move(f32 delta_time)
         client->player_pos_x = client->player_target_pos_x;
         client->player_pos_y = client->player_target_pos_y;
         client->player_anim = PLAYER_ANIM_NONE;
-        DEBUG(CLIENT, "move complete %d,%d", client->player_pos_x, client->player_pos_y);
+        DEBUG("move complete %d,%d", client->player_pos_x, client->player_pos_y);
     }
 }
 

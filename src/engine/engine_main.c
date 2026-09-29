@@ -13,6 +13,8 @@
 #include "draw.h"
 #include "console.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_RENDERER
+
 #define MAX_FRAMETIME_SAMPLES   512
 #define SAMPLE_WINDOW_S         0.2f
 
@@ -95,7 +97,7 @@ void Engine_Destroy(void)
 
 void Engine_HandleResize(u32 width, u32 height)
 {
-    DEBUG(RENDERER, "window resized to %ux%u", width, height);
+    DEBUG("window resized to %ux%u", width, height);
 
     Renderer_HandleResize(width, height);
 

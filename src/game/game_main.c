@@ -26,7 +26,9 @@ static void add_debug_categories(void);
 bool Game_Init(platform_window_t *window)
 {
 #ifdef DEBUG_BUILD
-    StaticAssert(ENGINE_DEBUG_CATEGORY_COUNT <= GAME_DEBUG_CATEGORY_FIRST,
+    StaticAssert(CORE_DEBUG_CATEGORY_COUNT <= ENGINE_DEBUG_CATEGORY_FIRST,
+             "core debug categories overlap the engine's");
+    StaticAssert(ENGINE_DEBUG_CATEGORY_END <= GAME_DEBUG_CATEGORY_FIRST,
              "engine debug categories overlap the game's");
 
     add_debug_categories();
@@ -100,16 +102,15 @@ static void pump(void)
 #ifdef DEBUG_BUILD
 static void add_debug_categories(void)
 {
-
-    Log_AddDebugCategory(string_lit("renderer"), RENDERER, false);
-    Log_AddDebugCategory(string_lit("model"), MODEL, false);
-    Log_AddDebugCategory(string_lit("animation"), ANIMATION, false);
-    Log_AddDebugCategory(string_lit("console"), CONSOLE, true);
-    Log_AddDebugCategory(string_lit("validation"), VALIDATION, true);
-    Log_AddDebugCategory(string_lit("protocol"), PROTOCOL, false);
-    Log_AddDebugCategory(string_lit("client"), CLIENT, true);
-    Log_AddDebugCategory(string_lit("server"), SERVER, true);
-    Log_AddDebugCategory(string_lit("los"), LOS, true);
-    Log_AddDebugCategory(string_lit("level_gen"), LEVEL_GEN, true);
+    Log_AddDebugCategory(string_lit("renderer"),    DEBUG_CAT_RENDERER,     false);
+    Log_AddDebugCategory(string_lit("model"),       DEBUG_CAT_MODEL,        false);
+    Log_AddDebugCategory(string_lit("animation"),   DEBUG_CAT_ANIMATION,    false);
+    Log_AddDebugCategory(string_lit("console"),     DEBUG_CAT_CONSOLE,      true);
+    Log_AddDebugCategory(string_lit("validation"),  DEBUG_CAT_VALIDATION,   true);
+    Log_AddDebugCategory(string_lit("protocol"),    DEBUG_CAT_PROTOCOL,     false);
+    Log_AddDebugCategory(string_lit("client"),      DEBUG_CAT_CLIENT,       true);
+    Log_AddDebugCategory(string_lit("server"),      DEBUG_CAT_SERVER,       true);
+    Log_AddDebugCategory(string_lit("los"),         DEBUG_CAT_LOS,          true);
+    Log_AddDebugCategory(string_lit("level_gen"),   DEBUG_CAT_LEVEL_GEN,    true);
 }
 #endif

@@ -10,6 +10,8 @@
 #include "mesh.h"
 #include "renderer.h"
 
+#define DEBUG_CATEGORY  DEBUG_CAT_ANIMATION
+
 extern arena_t *g_engine_arena;
 
 /* std430 palette entry; vec3 colors land in vec4 slots so the array stride
@@ -169,7 +171,7 @@ bool ModelInstance_PlayAnimationS(model_instance_handle_t instance, model_animat
     instance->anim_from_mesh = animation->keyframes[0].mesh;
     instance->anim_to_mesh = animation->keyframes[1].mesh;
 
-    DEBUG(ANIMATION, "playing animation %S (%.2fx)", animation->name, playback_speed);
+    DEBUG("playing animation " STR_FMT " (%.2fx)", STR_ARG(animation->name), playback_speed);
 
     return true;
 }
@@ -246,6 +248,6 @@ static i32 find_material(model_handle_t model, string name)
             return (i32)i;
     }
 
-    Log(WARNING, "model has no material slot named %S", name);
+    Log(WARNING, "model has no material slot named " STR_FMT, STR_ARG(name));
     return -1;
 }
