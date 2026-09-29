@@ -3,15 +3,26 @@
 
 #include "core.h"
 #include "level.h"
+#include "memory_arena.h"
 
-#define FOV_RADIUS 7
+#define FOV_RADIUS 6
 
-void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius);
-bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y);
-
-static inline bool Fov_InRadius(i32 dx, i32 dy, i32 radius)
+typedef struct
 {
-    return dx * dx + dy * dy <= radius * radius + radius;
-}
+    i8 dx;
+    i8 dy;
+    u32 end;
+} fov_cell_t;
+
+typedef struct
+{
+    i32 radius;
+    u32 cell_count;
+    fov_cell_t *cells;
+} fov_t;
+
+void Fov_Init(fov_t *fov, arena_t *arena, i32 radius);
+void Fov_Compute(const fov_t *fov, level_t *level, i32 origin_x, i32 origin_y);
+bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y);
 
 #endif

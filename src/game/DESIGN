@@ -693,29 +693,52 @@ differ):
     ONLY visible tiles not already revealed.
   - FOV (pulled forward from milestone 3), common/fov.c, one shared
     function Fov_Compute(level, x, y, radius). It clears and sets
-    FLAG_VISIBLE on the level it is given. Circle of FOV_RADIUS 7
-    (DCSS's default), in-radius test dx^2 + dy^2 <= r^2 + r for a rounder
-    edge. A tile is visible if a Bresenham line from the origin to it,
-    OR from it back to the origin, passes no sight-blocking tile. Only
-    TILE_WALL blocks (Rules_BlocksSight). The blocking tile itself is
-    visible. A second pass makes an in-radius wall visible when a visible
-    open neighbour sits on the player's side of it. Without it, a wall the
-    player stands next to is partly dark, because lines nearly parallel
-    to it clip the adjacent wall tile. "Player's side" (decided): an
-    orthogonal neighbour counts unless it lies on the far side along its
-    axis. A player level with the wall (standing in a doorway) still sees
-    the walls of the room along that row. A diagonal neighbour touches
-    the wall only at a corner, so it counts only when both tiles between
-    them block sight (a room's inner corner closing the outline), and it
-    is not on the far side on either axis. The first version (any of the
-    8 neighbours) lit walls the player cannot see: looking through a
-    doorway, the side walls of the corridor behind it lit up from the
-    doorway tile at their corner. Accepted: both side walls of a corridor
-    seen at an angle through a doorway stay fog.
+    FLAG_VISIBLE on the level it is given. A ray caster modelled on
+    DCSS (decided): the view is a SQUARE of FOV_RADIUS around the player.
+    Rays run in floating point to points spread evenly along the
+    square's outer boundary, FOV_RAYS_PER_TILE (8) per tile of edge.
+    Each ray steps exactly through the grid and stops when it leaves the
+    square (tested on integer tile coordinates). Two DCSS rules on top:
+      - Every tile counts as a DIAMOND (|dx| + |dy| < 0.5 around its
+        center), not a full square. A ray sees a tile, and is blocked by
+        a wall, only if it passes through that diamond. Rays that only
+        clip a tile's corner pass it untouched, so sight slips past wall
+        corners.
+      - Rays start anywhere in the PLAYER's diamond, approximated by 5
+        start points: the center, and 0.48 out towards each of the
+        diamond's 4 points. Standing in a doorway, a ray from the bottom
+        of the player's diamond runs just under the wall beside the
+        door, so the whole row below opens up, as in DCSS.
+    The blocking wall itself is visible. Only TILE_WALL blocks
+    (Rules_BlocksSight). The rays are PRECOMPUTED (decided, like DCSS):
+    they don't depend on the map, so Fov_Init(&fov, arena, radius)
+    traces all of them once, relative to the player, keeping only the
+    tiles whose diamond each ray passes. The server and the client each
+    own an fov_t, built from their long-lived arenas (about 5.7 KB for
+    radius 6). The temporary tree lives in a scratch region that is
+    popped afterwards. It is built twice, once to count the entries so
+    the kept array can be pushed first at its exact size. The rays are merged into a tree of
+    tile offsets (they share their starting stretch), stored flat in
+    depth-first order with each entry's end-of-branch index. A call is
+    then one linear walk: mark the tile, and jump past its branch if
+    it's a wall or off the map. About 5 us per call optimised, down
+    from about 190 us when tracing all the rays each time. Working
+    relative to the player is also more exact: absolute map
+    coordinates cost float precision, and flipped a few borderline
+    tiles. The result is more permissive than drawing
+    lines between tile centers (the user preferred the DCSS look).
+    History: one integer Bresenham ray per perimeter tile missed walls
+    seen at a shallow angle, and so did square walls with rays only from
+    the center. Stopping at crossing time t >= 1 leaked one tile past
+    the edge at some radii, because t is summed in floats. OPEN: with
+    diamond walls, sight passes through the gap between two walls that
+    touch at a corner (their diamonds don't meet there). Before the
+    diamonds, that was impossible, and the user had called that correct.
+    The FOV is not symmetric, which is fine: in this game, the player
+    seeing A means A sees the player.
   - Reveal margin (decided): the server reveals every visible tile PLUS
     every tile touching a visible OPEN (non-sight-blocking) tile, via
-    Fov_TouchesVisibleOpenTile (all 8 neighbours, no direction test,
-    unlike FOV's wall pass). That way
+    Fov_TouchesVisibleOpenTile (all 8 neighbours). That way
     every lit edge (view rim, shadow edges around corners, doorways) has
     fog next to it for the torn edge to tear into, instead of black.
     Neighbours of visible WALLS are deliberately excluded: those are the

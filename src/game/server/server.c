@@ -23,6 +23,7 @@ typedef struct
     rng_t rng;
 
     level_t level;
+    fov_t fov;
 
     i32 player_x;
     i32 player_y;
@@ -43,6 +44,7 @@ bool Server_Init(u64 seed)
     server->arena = MemoryArena_Create("server-arena");
     server->run_arena = MemoryArena_Create("server-run-arena");
     server->outbox = ArrayQueue_Create(server->arena, sizeof(event_t), OUTBOX_CAPACITY);
+    Fov_Init(&server->fov, server->arena, FOV_RADIUS);
     Rng_Seed(&server->rng, seed);
     Log(INFO, "server seed=%lu", seed);
 
@@ -114,7 +116,7 @@ static void reveal_visible(void)
     server_t *server = &g_server;
     level_t *level = &server->level;
 
-    Fov_Compute(level, server->player_x, server->player_y, FOV_RADIUS);
+    Fov_Compute(&server->fov, level, server->player_x, server->player_y);
 
     for (i32 y = server->player_y - REVEAL_RADIUS; y <= server->player_y + REVEAL_RADIUS; y++)
     {
@@ -127,18 +129,19 @@ static void reveal_visible(void)
             if (tile->flags & FLAG_REVEALED)
                 continue;
 
+            /* also reveal tiles that borders a visible tile */
             if (!(tile->flags & FLAG_VISIBLE) && !Fov_TouchesVisibleOpenTile(level, x, y))
                 continue;
 
             tile->flags |= FLAG_REVEALED;
-
             event_t reveal = {
                 .type = TILE_REVEAL,
-                .tile_reveal = {
-                    .x = (u16)x,
-                    .y = (u16)y,
-                    .tile = tile->type,
-                },
+                .tile_reveal =
+                    {
+                        .x = (u16)x,
+                        .y = (u16)y,
+                        .tile = tile->type,
+                    },
             };
             send(&reveal);
         }

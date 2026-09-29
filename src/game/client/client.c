@@ -174,6 +174,7 @@ typedef struct
 
     arena_t *run_arena;
     level_t level;
+    fov_t fov;
     bool run_active;
     bool fov_dirty;
 
@@ -219,6 +220,7 @@ bool Client_Init(void)
     g_client.run_arena = MemoryArena_Create("client-run-arena");
     g_client.outbox = ArrayQueue_Create(g_client.arena, sizeof(command_t), OUTBOX_CAPACITY);
     Fog_Init(g_client.arena, WALL_HEIGHT);
+    Fov_Init(&g_client.fov, g_client.arena, FOV_RADIUS);
 
     g_client.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
     g_client.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_QUAD);
@@ -542,7 +544,7 @@ void Client_Update(f32 delta_time)
 
     if (g_client.fov_dirty)
     {
-        Fov_Compute(&g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y, FOV_RADIUS);
+        Fov_Compute(&g_client.fov, &g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y);
         Fog_OnVisibilityChanged(g_client.player_target_pos_x, g_client.player_target_pos_y);
         g_client.fov_dirty = false;
     }

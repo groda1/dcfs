@@ -19,7 +19,8 @@ bool Game_Init(platform_window_t *window)
     if (!Client_Init())
         goto error_engine;
 
-    if (!Server_Init(OS_TimeNowNs()))
+    //if (!Server_Init(OS_TimeNowNs()))
+    if (!Server_Init(123456))
         goto error_client;
 
     return true;

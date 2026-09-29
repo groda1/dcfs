@@ -1,47 +1,107 @@
 #include "fov.h"
+#include "log.h"
+#include "os_time.h"
 #include "rules.h"
 
-static bool line_clear(const level_t *level, i32 x0, i32 y0, i32 x1, i32 y1);
-static bool faces_visible_open_tile(const level_t *level, i32 x, i32 y, i32 origin_x, i32 origin_y);
+#define FOV_RAYS_PER_TILE   8
+#define FOV_DIAMOND_RADIUS  0.5f
+#define FOV_START_REACH     0.48f
+#define FOV_NO_NODE         0xFFFFFFFFu
 
-void Fov_Compute(level_t *level, i32 origin_x, i32 origin_y, i32 radius)
+typedef struct
 {
+    i8 dx;
+    i8 dy;
+    u32 first_child;
+    u32 next_sibling;
+} fov_node_t;
+
+typedef struct
+{
+    i32 radius;
+    u32 ray_count;
+    u32 node_count;
+    u32 node_capacity;
+    fov_node_t *nodes;
+} fov_tree_t;
+
+static const f32 FOV_STARTS[][2] = {
+    { 0.0f, 0.0f },
+    { 0.0f, -FOV_START_REACH },
+    { FOV_START_REACH, 0.0f },
+    { 0.0f, FOV_START_REACH },
+    { -FOV_START_REACH, 0.0f },
+};
+
+static void build_tree(fov_tree_t *tree, arena_t *arena, i32 radius);
+static void add_ray(fov_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y);
+static u32  child_node(fov_tree_t *tree, u32 parent, i8 dx, i8 dy);
+static void flatten(const fov_tree_t *tree, u32 node, fov_t *fov);
+static f32  first_crossing(f32 start, i32 cell, f32 delta);
+static bool passes_diamond(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
+                           f32 t0, f32 t1, i32 x, i32 y);
+static f32  diamond_distance(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
+                             f32 t, f32 center_x, f32 center_y);
+static f32  absolute(f32 value);
+
+void Fov_Init(fov_t *fov, arena_t *arena, i32 radius)
+{
+    Assert(radius >= 0 && radius <= 127);
+
+    u64 start_ns = OS_TimeNowNs();
+    fov_tree_t tree;
+    scratch_t scratch = Scratch_Begin(arena);
+    build_tree(&tree, arena, radius);
+    u32 cell_count = tree.node_count - 1;
+    Scratch_End(scratch);
+
+    fov->radius = radius;
+    fov->cell_count = 0;
+    fov->cells = arena_push_array(arena, fov_cell_t, cell_count);
+
+    scratch = Scratch_Begin(arena);
+    build_tree(&tree, arena, radius);
+    for (u32 child = tree.nodes[0].first_child; child != FOV_NO_NODE; child = tree.nodes[child].next_sibling)
+        flatten(&tree, child, fov);
+    Scratch_End(scratch);
+
+    Assert(fov->cell_count == cell_count);
+
+    Log(DEBUG, "fov: radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
+        radius, tree.ray_count, fov->cell_count,
+        (u32)(fov->cell_count * sizeof(fov_cell_t)),
+        (u32)(tree.node_capacity * sizeof(fov_node_t)),
+        (f64)(OS_TimeNowNs() - start_ns) / 1e6);
+}
+
+void Fov_Compute(const fov_t *fov, level_t *level, i32 origin_x, i32 origin_y)
+{
+    // TODO: optimize
     u64 tile_count = (u64)level->width * level->height;
     for (u64 i = 0; i < tile_count; i++)
         level->tiles[i].flags &= (u16)~FLAG_VISIBLE;
 
-    for (i32 y = origin_y - radius; y <= origin_y + radius; y++)
+    if (!Level_InBounds(level, origin_x, origin_y))
+        return;
+
+    Level_GetTile(level, origin_x, origin_y)->flags |= FLAG_VISIBLE;
+
+    u32 i = 0;
+    while (i < fov->cell_count)
     {
-        for (i32 x = origin_x - radius; x <= origin_x + radius; x++)
+        const fov_cell_t *cell = &fov->cells[i];
+        i32 x = origin_x + cell->dx;
+        i32 y = origin_y + cell->dy;
+
+        if (!Level_InBounds(level, x, y))
         {
-            if (!Level_InBounds(level, x, y))
-                continue;
-
-            if (!Fov_InRadius(x - origin_x, y - origin_y, radius))
-                continue;
-
-            if (line_clear(level, origin_x, origin_y, x, y)
-                || line_clear(level, x, y, origin_x, origin_y))
-            {
-                Level_GetTile(level, x, y)->flags |= FLAG_VISIBLE;
-            }
+            i = cell->end;
+            continue;
         }
-    }
 
-    for (i32 y = origin_y - radius; y <= origin_y + radius; y++)
-    {
-        for (i32 x = origin_x - radius; x <= origin_x + radius; x++)
-        {
-            if (!Level_InBounds(level, x, y) || !Fov_InRadius(x - origin_x, y - origin_y, radius))
-                continue;
+        Level_GetTile(level, x, y)->flags |= FLAG_VISIBLE;
 
-            tile_t *tile = Level_GetTile(level, x, y);
-            if ((tile->flags & FLAG_VISIBLE) || !Rules_BlocksSight(level, x, y))
-                continue;
-
-            if (faces_visible_open_tile(level, x, y, origin_x, origin_y))
-                tile->flags |= FLAG_VISIBLE;
-        }
+        i = Rules_BlocksSight(level, x, y) ? cell->end : i + 1;
     }
 }
 
@@ -62,64 +122,156 @@ bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
     return false;
 }
 
-static bool faces_visible_open_tile(const level_t *level, i32 x, i32 y, i32 origin_x, i32 origin_y)
+static void build_tree(fov_tree_t *tree, arena_t *arena, i32 radius)
 {
-    i32 toward_x = (origin_x > x) - (origin_x < x);
-    i32 toward_y = (origin_y > y) - (origin_y < y);
+    u32 ray_count = (u32)(2 * radius + 1) * FOV_RAYS_PER_TILE;
+    u32 max_ray_cells = (u32)(2 * radius + 2);
 
-    for (i32 dy = -1; dy <= 1; dy++)
+    tree->radius = radius;
+    tree->ray_count = 0;
+    tree->node_count = 1;
+    tree->node_capacity = 1 + (u32)ArrayCount(FOV_STARTS) * 4 * ray_count * max_ray_cells;
+    tree->nodes = arena_push_array_no_zero(arena, fov_node_t, tree->node_capacity);
+    tree->nodes[0] = (fov_node_t){ .first_child = FOV_NO_NODE, .next_sibling = FOV_NO_NODE };
+
+    f32 left = (f32)-radius;
+    f32 right = (f32)(radius + 1);
+    f32 bottom = (f32)-radius;
+    f32 top = (f32)(radius + 1);
+
+    for (u32 s = 0; s < ArrayCount(FOV_STARTS); s++)
     {
-        for (i32 dx = -1; dx <= 1; dx++)
+        f32 start_x = 0.5f + FOV_STARTS[s][0];
+        f32 start_y = 0.5f + FOV_STARTS[s][1];
+
+        for (u32 i = 0; i < ray_count; i++)
         {
-            if (dx == 0 && dy == 0)
-                continue;
-
-            if ((dx != 0 && dx == -toward_x) || (dy != 0 && dy == -toward_y))
-                continue;
-
-            if (dx != 0 && dy != 0
-                && !(Rules_BlocksSight(level, x + dx, y) && Rules_BlocksSight(level, x, y + dy)))
-                continue;
-
-            if (Rules_BlocksSight(level, x + dx, y + dy))
-                continue;
-
-            if (Level_GetTile(level, x + dx, y + dy)->flags & FLAG_VISIBLE)
-                return true;
+            f32 along = ((f32)i + 0.5f) / FOV_RAYS_PER_TILE;
+            add_ray(tree, start_x, start_y, left + along, bottom);
+            add_ray(tree, start_x, start_y, left + along, top);
+            add_ray(tree, start_x, start_y, left, bottom + along);
+            add_ray(tree, start_x, start_y, right, bottom + along);
         }
     }
-
-    return false;
 }
 
-static bool line_clear(const level_t *level, i32 x0, i32 y0, i32 x1, i32 y1)
+static void add_ray(fov_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y)
 {
-    i32 dx = x1 > x0 ? x1 - x0 : x0 - x1;
-    i32 dy = y1 > y0 ? y1 - y0 : y0 - y1;
-    i32 sx = x1 > x0 ? 1 : -1;
-    i32 sy = y1 > y0 ? 1 : -1;
-    i32 err = dx - dy;
+    f32 delta_x = target_x - start_x;
+    f32 delta_y = target_y - start_y;
+    if (delta_x == 0.0f && delta_y == 0.0f)
+        return;
 
-    i32 x = x0;
-    i32 y = y0;
+    tree->ray_count++;
+
+    i32 radius = tree->radius;
+    i32 x = 0;
+    i32 y = 0;
+    i32 step_x = delta_x >= 0.0f ? 1 : -1;
+    i32 step_y = delta_y >= 0.0f ? 1 : -1;
+    f32 advance_x = (f32)step_x / delta_x;
+    f32 advance_y = (f32)step_y / delta_y;
+    f32 next_x = first_crossing(start_x, x, delta_x);
+    f32 next_y = first_crossing(start_y, y, delta_y);
+    u32 node = 0;
+
     for (;;)
     {
-        i32 e2 = 2 * err;
-        if (e2 > -dy)
+        f32 entry = Min(next_x, next_y);
+        if (next_x < next_y)
         {
-            err -= dy;
-            x += sx;
+            x += step_x;
+            next_x += advance_x;
         }
-        if (e2 < dx)
+        else
         {
-            err += dx;
-            y += sy;
+            y += step_y;
+            next_y += advance_y;
         }
+        f32 exit = Min(next_x, next_y);
 
-        if (x == x1 && y == y1)
-            return true;
+        if (x < -radius || x > radius || y < -radius || y > radius)
+            return;
 
-        if (Rules_BlocksSight(level, x, y))
-            return false;
+        if (passes_diamond(start_x, start_y, delta_x, delta_y, entry, exit, x, y))
+            node = child_node(tree, node, (i8)x, (i8)y);
     }
+}
+
+static u32 child_node(fov_tree_t *tree, u32 parent, i8 dx, i8 dy)
+{
+    u32 *link = &tree->nodes[parent].first_child;
+    while (*link != FOV_NO_NODE)
+    {
+        fov_node_t *node = &tree->nodes[*link];
+        if (node->dx == dx && node->dy == dy)
+            return *link;
+        link = &node->next_sibling;
+    }
+
+    Assert(tree->node_count < tree->node_capacity);
+    u32 index = tree->node_count++;
+    tree->nodes[index] = (fov_node_t){
+        .dx = dx,
+        .dy = dy,
+        .first_child = FOV_NO_NODE,
+        .next_sibling = FOV_NO_NODE,
+    };
+    *link = index;
+    return index;
+}
+
+static void flatten(const fov_tree_t *tree, u32 node, fov_t *fov)
+{
+    u32 index = fov->cell_count++;
+    fov->cells[index].dx = tree->nodes[node].dx;
+    fov->cells[index].dy = tree->nodes[node].dy;
+
+    for (u32 child = tree->nodes[node].first_child; child != FOV_NO_NODE; child = tree->nodes[child].next_sibling)
+        flatten(tree, child, fov);
+
+    fov->cells[index].end = fov->cell_count;
+}
+
+static f32 first_crossing(f32 start, i32 cell, f32 delta)
+{
+    if (delta >= 0.0f)
+        return ((f32)(cell + 1) - start) / delta;
+
+    return ((f32)cell - start) / delta;
+}
+
+static bool passes_diamond(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
+                           f32 t0, f32 t1, i32 x, i32 y)
+{
+    f32 center_x = (f32)x + 0.5f;
+    f32 center_y = (f32)y + 0.5f;
+
+    f32 closest = Min(diamond_distance(start_x, start_y, delta_x, delta_y, t0, center_x, center_y),
+                      diamond_distance(start_x, start_y, delta_x, delta_y, t1, center_x, center_y));
+
+    if (delta_x != 0.0f)
+    {
+        f32 t = Clamp(t0, (center_x - start_x) / delta_x, t1);
+        closest = Min(closest, diamond_distance(start_x, start_y, delta_x, delta_y, t, center_x, center_y));
+    }
+
+    if (delta_y != 0.0f)
+    {
+        f32 t = Clamp(t0, (center_y - start_y) / delta_y, t1);
+        closest = Min(closest, diamond_distance(start_x, start_y, delta_x, delta_y, t, center_x, center_y));
+    }
+
+    return closest < FOV_DIAMOND_RADIUS;
+}
+
+static f32 diamond_distance(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
+                            f32 t, f32 center_x, f32 center_y)
+{
+    return absolute(start_x + delta_x * t - center_x) + absolute(start_y + delta_y * t - center_y);
+}
+
+static f32 absolute(f32 value)
+{
+    return value < 0.0f ? -value : value;
 }
