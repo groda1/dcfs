@@ -6,12 +6,14 @@
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
 
+static void init_log();
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
 
-    Log_Init();
+    init_log();
 
     if (!Platform_Init())
         return -1;
@@ -86,3 +88,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, PSTR cmd_line, i
     return main(0, NULL);
 }
 #endif
+
+
+static void init_log()
+{
+    Log_Init();
+
+
+}

@@ -7,7 +7,7 @@
 #include "client.h"
 #include "engine_types.h"
 #include "fog.h"
-#include "fov.h"
+#include "los.h"
 #include "level.h"
 #include "memory_arena.h"
 #include "mesh.h"
@@ -174,9 +174,9 @@ typedef struct
 
     arena_t *run_arena;
     level_t level;
-    fov_t fov;
+    los_t los;
     bool run_active;
-    bool fov_dirty;
+    bool los_dirty;
 
     i32 server_player_x;
     i32 server_player_y;
@@ -220,7 +220,7 @@ bool Client_Init(void)
     g_client.run_arena = MemoryArena_Create("client-run-arena");
     g_client.outbox = ArrayQueue_Create(g_client.arena, sizeof(command_t), OUTBOX_CAPACITY);
     Fog_Init(g_client.arena, WALL_HEIGHT);
-    Fov_Init(&g_client.fov, g_client.arena, FOV_RADIUS);
+    LoS_Init(&g_client.los, g_client.arena, LOS_RADIUS);
 
     g_client.cube_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_CUBE);
     g_client.quad_mesh = MeshManager_GetPredefinedMesh(PREDEFINED_MESH_NORMALED_QUAD);
@@ -542,11 +542,11 @@ void Client_Update(f32 delta_time)
 
     delta_time *= GAME_SLOWMOTION_FACTOR;
 
-    if (g_client.fov_dirty)
+    if (g_client.los_dirty)
     {
-        Fov_Compute(&g_client.fov, &g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y);
+        LoS_Compute(&g_client.los, &g_client.level, g_client.player_target_pos_x, g_client.player_target_pos_y);
         Fog_OnVisibilityChanged(g_client.player_target_pos_x, g_client.player_target_pos_y);
-        g_client.fov_dirty = false;
+        g_client.los_dirty = false;
     }
 
     Fog_Update(delta_time);
@@ -984,7 +984,7 @@ static bool player_attempt_move(i32 dx, i32 dy)
         client->player_target_pos_x = new_x;
         client->player_target_pos_y = new_y;
         Fog_Snapshot();
-        client->fov_dirty = true;
+        client->los_dirty = true;
         client->player_anim = PLAYER_ANIM_MOVE;
         client->step_count++;
 
@@ -1012,7 +1012,7 @@ static void handle_level_init(const event_level_init_t *init)
     Fog_Reset(&client->level, client->run_arena);
 
     client->move_pending = false;
-    client->fov_dirty = true;
+    client->los_dirty = true;
 }
 
 static void handle_tile_reveal(const event_tile_reveal_t *reveal)
@@ -1029,7 +1029,7 @@ static void handle_tile_reveal(const event_tile_reveal_t *reveal)
     tile->type = reveal->tile;
     tile->flags |= FLAG_REVEALED;
 
-    client->fov_dirty = true;
+    client->los_dirty = true;
 }
 
 static void handle_player_moved(const event_player_moved_t *moved)
@@ -1084,7 +1084,7 @@ static void snap_player_to(i32 x, i32 y)
     client->player_anim = PLAYER_ANIM_NONE;
     client->player_gfx_pos = player_center(x, y);
     client->player_gfx_target_pos = client->player_gfx_pos;
-    client->fov_dirty = true;
+    client->los_dirty = true;
 }
 
 static void send(const command_t *command)

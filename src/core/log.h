@@ -38,12 +38,21 @@ typedef struct
 void Log_Init(void);
 void Log_Destroy(void);
 
-
 void Log(log_severity_t severity, const char *log, ...);
 
 u64 Log_Count();
 u64 Log_Total();
 log_entry_t *Log_Get(u64 index);
+
+
+#ifdef DEBUG_BUILD
+
+typedef u16 debug_log_category_t;
+void Log_SetDebugCategory(debug_log_category_t category, bool enabled);
+
+void _DebugLog(debug_log_category_t category, const char *log, ...);
+
+#endif
 
 
 #endif

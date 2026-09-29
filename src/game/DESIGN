@@ -691,12 +691,13 @@ differ):
     it. Separate "is the level ready" / "is the player placed" flags
     were tried and rejected. After each move it recomputes FOV and sends
     ONLY visible tiles not already revealed.
-  - FOV (pulled forward from milestone 3), common/fov.c, one shared
-    function Fov_Compute(level, x, y, radius). It clears and sets
+  - Line of sight, LoS (pulled forward from milestone 3; named FOV
+    until 2026-09-29), common/los.c, one shared
+    function LoS_Compute(&los, level, x, y). It clears and sets
     FLAG_VISIBLE on the level it is given. A ray caster modelled on
-    DCSS (decided): the view is a SQUARE of FOV_RADIUS around the player.
+    DCSS (decided): the view is a SQUARE of LOS_RADIUS around the player.
     Rays run in floating point to points spread evenly along the
-    square's outer boundary, FOV_RAYS_PER_TILE (8) per tile of edge.
+    square's outer boundary, LOS_RAYS_PER_TILE (8) per tile of edge.
     Each ray steps exactly through the grid and stops when it leaves the
     square (tested on integer tile coordinates). Two DCSS rules on top:
       - Every tile counts as a DIAMOND (|dx| + |dy| < 0.5 around its
@@ -711,10 +712,10 @@ differ):
         door, so the whole row below opens up, as in DCSS.
     The blocking wall itself is visible. Only TILE_WALL blocks
     (Rules_BlocksSight). The rays are PRECOMPUTED (decided, like DCSS):
-    they don't depend on the map, so Fov_Init(&fov, arena, radius)
+    they don't depend on the map, so LoS_Init(&los, arena, radius)
     traces all of them once, relative to the player, keeping only the
     tiles whose diamond each ray passes. The server and the client each
-    own an fov_t, built from their long-lived arenas (about 5.7 KB for
+    own a los_t, built from their long-lived arenas (about 5.7 KB for
     radius 6). The temporary tree lives in a scratch region that is
     popped afterwards. It is built twice, once to count the entries so
     the kept array can be pushed first at its exact size. The rays are merged into a tree of
@@ -738,7 +739,7 @@ differ):
     seeing A means A sees the player.
   - Reveal margin (decided): the server reveals every visible tile PLUS
     every tile touching a visible OPEN (non-sight-blocking) tile, via
-    Fov_TouchesVisibleOpenTile (all 8 neighbours). That way
+    LoS_TouchesVisibleOpenTile (all 8 neighbours). That way
     every lit edge (view rim, shadow edges around corners, doorways) has
     fog next to it for the torn edge to tear into, instead of black.
     Neighbours of visible WALLS are deliberately excluded: those are the
@@ -936,7 +937,7 @@ keep going after the step has ended.
     start below the tear instead of popping a strip in. Fog spreading
     costs nothing there.
   - On each view change (the client's FOV recompute), a Dijkstra over
-    the samples within FOV_RADIUS + 4 of the player gives every sample
+    the samples within LOS_RADIUS + 4 of the player gives every sample
     whose state changes the time the change reaches it. Sources are the
     samples already in their new state. A change only travels through
     samples heading for the same state: light through the newly visible
@@ -946,7 +947,7 @@ keep going after the step has ended.
     That is what lets overlapping steps chain without popping. Samples
     nothing reaches (run start, where nothing is lit yet) get a radial
     time: light spreads out from the player, fog closes in from
-    FOV_RADIUS + 1.
+    LOS_RADIUS + 1.
   - Per frame, each sample's front distance is FOG_SPEED * (time -
     clock), signed so that negative means lit. The shader interpolates
     the surface's own samples bilinearly. For a PENDING

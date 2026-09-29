@@ -1,12 +1,12 @@
-#include "fov.h"
+#include "los.h"
 #include "log.h"
 #include "os_time.h"
 #include "rules.h"
 
-#define FOV_RAYS_PER_TILE   8
-#define FOV_DIAMOND_RADIUS  0.5f
-#define FOV_START_REACH     0.48f
-#define FOV_NO_NODE         0xFFFFFFFFu
+#define LOS_RAYS_PER_TILE   8
+#define LOS_DIAMOND_RADIUS  0.5f
+#define LOS_START_REACH     0.48f
+#define LOS_NO_NODE         0xFFFFFFFFu
 
 typedef struct
 {
@@ -14,7 +14,7 @@ typedef struct
     i8 dy;
     u32 first_child;
     u32 next_sibling;
-} fov_node_t;
+} los_node_t;
 
 typedef struct
 {
@@ -22,21 +22,21 @@ typedef struct
     u32 ray_count;
     u32 node_count;
     u32 node_capacity;
-    fov_node_t *nodes;
-} fov_tree_t;
+    los_node_t *nodes;
+} los_tree_t;
 
-static const f32 FOV_STARTS[][2] = {
+static const f32 LOS_STARTS[][2] = {
     { 0.0f, 0.0f },
-    { 0.0f, -FOV_START_REACH },
-    { FOV_START_REACH, 0.0f },
-    { 0.0f, FOV_START_REACH },
-    { -FOV_START_REACH, 0.0f },
+    { 0.0f, -LOS_START_REACH },
+    { LOS_START_REACH, 0.0f },
+    { 0.0f, LOS_START_REACH },
+    { -LOS_START_REACH, 0.0f },
 };
 
-static void build_tree(fov_tree_t *tree, arena_t *arena, i32 radius);
-static void add_ray(fov_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y);
-static u32  child_node(fov_tree_t *tree, u32 parent, i8 dx, i8 dy);
-static void flatten(const fov_tree_t *tree, u32 node, fov_t *fov);
+static void build_tree(los_tree_t *tree, arena_t *arena, i32 radius);
+static void add_ray(los_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y);
+static u32  child_node(los_tree_t *tree, u32 parent, i8 dx, i8 dy);
+static void flatten(const los_tree_t *tree, u32 node, los_t *los);
 static f32  first_crossing(f32 start, i32 cell, f32 delta);
 static bool passes_diamond(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
                            f32 t0, f32 t1, i32 x, i32 y);
@@ -44,37 +44,37 @@ static f32  diamond_distance(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
                              f32 t, f32 center_x, f32 center_y);
 static f32  absolute(f32 value);
 
-void Fov_Init(fov_t *fov, arena_t *arena, i32 radius)
+void LoS_Init(los_t *los, arena_t *arena, i32 radius)
 {
     Assert(radius >= 0 && radius <= 127);
 
     u64 start_ns = OS_TimeNowNs();
-    fov_tree_t tree;
+    los_tree_t tree;
     scratch_t scratch = Scratch_Begin(arena);
     build_tree(&tree, arena, radius);
     u32 cell_count = tree.node_count - 1;
     Scratch_End(scratch);
 
-    fov->radius = radius;
-    fov->cell_count = 0;
-    fov->cells = arena_push_array(arena, fov_cell_t, cell_count);
+    los->radius = radius;
+    los->cell_count = 0;
+    los->cells = arena_push_array(arena, los_cell_t, cell_count);
 
     scratch = Scratch_Begin(arena);
     build_tree(&tree, arena, radius);
-    for (u32 child = tree.nodes[0].first_child; child != FOV_NO_NODE; child = tree.nodes[child].next_sibling)
-        flatten(&tree, child, fov);
+    for (u32 child = tree.nodes[0].first_child; child != LOS_NO_NODE; child = tree.nodes[child].next_sibling)
+        flatten(&tree, child, los);
     Scratch_End(scratch);
 
-    Assert(fov->cell_count == cell_count);
+    Assert(los->cell_count == cell_count);
 
-    Log(DEBUG, "fov: radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
-        radius, tree.ray_count, fov->cell_count,
-        (u32)(fov->cell_count * sizeof(fov_cell_t)),
-        (u32)(tree.node_capacity * sizeof(fov_node_t)),
+    Log(DEBUG, "los: radius %d, %u rays, %u cells, %u bytes kept, %u bytes scratch, built in %.2f ms",
+        radius, tree.ray_count, los->cell_count,
+        (u32)(los->cell_count * sizeof(los_cell_t)),
+        (u32)(tree.node_capacity * sizeof(los_node_t)),
         (f64)(OS_TimeNowNs() - start_ns) / 1e6);
 }
 
-void Fov_Compute(const fov_t *fov, level_t *level, i32 origin_x, i32 origin_y)
+void LoS_Compute(const los_t *los, level_t *level, i32 origin_x, i32 origin_y)
 {
     // TODO: optimize
     u64 tile_count = (u64)level->width * level->height;
@@ -87,9 +87,9 @@ void Fov_Compute(const fov_t *fov, level_t *level, i32 origin_x, i32 origin_y)
     Level_GetTile(level, origin_x, origin_y)->flags |= FLAG_VISIBLE;
 
     u32 i = 0;
-    while (i < fov->cell_count)
+    while (i < los->cell_count)
     {
-        const fov_cell_t *cell = &fov->cells[i];
+        const los_cell_t *cell = &los->cells[i];
         i32 x = origin_x + cell->dx;
         i32 y = origin_y + cell->dy;
 
@@ -105,7 +105,7 @@ void Fov_Compute(const fov_t *fov, level_t *level, i32 origin_x, i32 origin_y)
     }
 }
 
-bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
+bool LoS_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
 {
     for (i32 ny = y - 1; ny <= y + 1; ny++)
     {
@@ -122,31 +122,31 @@ bool Fov_TouchesVisibleOpenTile(const level_t *level, i32 x, i32 y)
     return false;
 }
 
-static void build_tree(fov_tree_t *tree, arena_t *arena, i32 radius)
+static void build_tree(los_tree_t *tree, arena_t *arena, i32 radius)
 {
-    u32 ray_count = (u32)(2 * radius + 1) * FOV_RAYS_PER_TILE;
+    u32 ray_count = (u32)(2 * radius + 1) * LOS_RAYS_PER_TILE;
     u32 max_ray_cells = (u32)(2 * radius + 2);
 
     tree->radius = radius;
     tree->ray_count = 0;
     tree->node_count = 1;
-    tree->node_capacity = 1 + (u32)ArrayCount(FOV_STARTS) * 4 * ray_count * max_ray_cells;
-    tree->nodes = arena_push_array_no_zero(arena, fov_node_t, tree->node_capacity);
-    tree->nodes[0] = (fov_node_t){ .first_child = FOV_NO_NODE, .next_sibling = FOV_NO_NODE };
+    tree->node_capacity = 1 + (u32)ArrayCount(LOS_STARTS) * 4 * ray_count * max_ray_cells;
+    tree->nodes = arena_push_array_no_zero(arena, los_node_t, tree->node_capacity);
+    tree->nodes[0] = (los_node_t){ .first_child = LOS_NO_NODE, .next_sibling = LOS_NO_NODE };
 
     f32 left = (f32)-radius;
     f32 right = (f32)(radius + 1);
     f32 bottom = (f32)-radius;
     f32 top = (f32)(radius + 1);
 
-    for (u32 s = 0; s < ArrayCount(FOV_STARTS); s++)
+    for (u32 s = 0; s < ArrayCount(LOS_STARTS); s++)
     {
-        f32 start_x = 0.5f + FOV_STARTS[s][0];
-        f32 start_y = 0.5f + FOV_STARTS[s][1];
+        f32 start_x = 0.5f + LOS_STARTS[s][0];
+        f32 start_y = 0.5f + LOS_STARTS[s][1];
 
         for (u32 i = 0; i < ray_count; i++)
         {
-            f32 along = ((f32)i + 0.5f) / FOV_RAYS_PER_TILE;
+            f32 along = ((f32)i + 0.5f) / LOS_RAYS_PER_TILE;
             add_ray(tree, start_x, start_y, left + along, bottom);
             add_ray(tree, start_x, start_y, left + along, top);
             add_ray(tree, start_x, start_y, left, bottom + along);
@@ -155,7 +155,7 @@ static void build_tree(fov_tree_t *tree, arena_t *arena, i32 radius)
     }
 }
 
-static void add_ray(fov_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y)
+static void add_ray(los_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f32 target_y)
 {
     f32 delta_x = target_x - start_x;
     f32 delta_y = target_y - start_y;
@@ -198,12 +198,12 @@ static void add_ray(fov_tree_t *tree, f32 start_x, f32 start_y, f32 target_x, f3
     }
 }
 
-static u32 child_node(fov_tree_t *tree, u32 parent, i8 dx, i8 dy)
+static u32 child_node(los_tree_t *tree, u32 parent, i8 dx, i8 dy)
 {
     u32 *link = &tree->nodes[parent].first_child;
-    while (*link != FOV_NO_NODE)
+    while (*link != LOS_NO_NODE)
     {
-        fov_node_t *node = &tree->nodes[*link];
+        los_node_t *node = &tree->nodes[*link];
         if (node->dx == dx && node->dy == dy)
             return *link;
         link = &node->next_sibling;
@@ -211,26 +211,26 @@ static u32 child_node(fov_tree_t *tree, u32 parent, i8 dx, i8 dy)
 
     Assert(tree->node_count < tree->node_capacity);
     u32 index = tree->node_count++;
-    tree->nodes[index] = (fov_node_t){
+    tree->nodes[index] = (los_node_t){
         .dx = dx,
         .dy = dy,
-        .first_child = FOV_NO_NODE,
-        .next_sibling = FOV_NO_NODE,
+        .first_child = LOS_NO_NODE,
+        .next_sibling = LOS_NO_NODE,
     };
     *link = index;
     return index;
 }
 
-static void flatten(const fov_tree_t *tree, u32 node, fov_t *fov)
+static void flatten(const los_tree_t *tree, u32 node, los_t *los)
 {
-    u32 index = fov->cell_count++;
-    fov->cells[index].dx = tree->nodes[node].dx;
-    fov->cells[index].dy = tree->nodes[node].dy;
+    u32 index = los->cell_count++;
+    los->cells[index].dx = tree->nodes[node].dx;
+    los->cells[index].dy = tree->nodes[node].dy;
 
-    for (u32 child = tree->nodes[node].first_child; child != FOV_NO_NODE; child = tree->nodes[child].next_sibling)
-        flatten(tree, child, fov);
+    for (u32 child = tree->nodes[node].first_child; child != LOS_NO_NODE; child = tree->nodes[child].next_sibling)
+        flatten(tree, child, los);
 
-    fov->cells[index].end = fov->cell_count;
+    los->cells[index].end = los->cell_count;
 }
 
 static f32 first_crossing(f32 start, i32 cell, f32 delta)
@@ -262,7 +262,7 @@ static bool passes_diamond(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,
         closest = Min(closest, diamond_distance(start_x, start_y, delta_x, delta_y, t, center_x, center_y));
     }
 
-    return closest < FOV_DIAMOND_RADIUS;
+    return closest < LOS_DIAMOND_RADIUS;
 }
 
 static f32 diamond_distance(f32 start_x, f32 start_y, f32 delta_x, f32 delta_y,

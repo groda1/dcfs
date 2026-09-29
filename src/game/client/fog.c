@@ -2,10 +2,10 @@
 
 #include <math.h>
 
-#include "fov.h"
+#include "los.h"
 
 #define FOG_WINDOW_SIZE             32
-#define FOG_GRAPH_RADIUS            (FOV_RADIUS + 4)
+#define FOG_GRAPH_RADIUS            (LOS_RADIUS + 4)
 #define FOG_GRAPH_SIZE              (2 * FOG_GRAPH_RADIUS + 1)
 #define FOG_SURFACES_PER_TILE       5
 #define FOG_NODES_PER_TILE          (FOG_SURFACES_PER_TILE * FOG_SURFACE_SAMPLES)
@@ -466,7 +466,7 @@ static f32 fallback_time(i32 x, i32 y, u32 slot, bool gain, i32 origin_x, i32 or
     if (gain)
         return g_fog.clock + distance / FOG_SPEED;
 
-    return g_fog.clock + Max(0.0f, (f32)FOV_RADIUS + 1.0f - distance) / FOG_SPEED;
+    return g_fog.clock + Max(0.0f, (f32)LOS_RADIUS + 1.0f - distance) / FOG_SPEED;
 }
 
 static void prepare_light(void)

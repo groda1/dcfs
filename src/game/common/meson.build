@@ -1,5 +1,5 @@
 common_sources += files(
-    'fov.c',
+    'los.c',
     'level.c',
     'protocol.c',
     'rules.c',

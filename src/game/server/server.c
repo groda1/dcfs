@@ -1,7 +1,7 @@
 #include "server.h"
 
 #include "array_queue.h"
-#include "fov.h"
+#include "los.h"
 #include "level.h"
 #include "level_gen.h"
 #include "log.h"
@@ -14,7 +14,7 @@
 
 #define OUTBOX_CAPACITY         1024
 
-#define REVEAL_RADIUS           (FOV_RADIUS + 1)
+#define REVEAL_RADIUS           (LOS_RADIUS + 1)
 
 typedef struct
 {
@@ -23,7 +23,7 @@ typedef struct
     rng_t rng;
 
     level_t level;
-    fov_t fov;
+    los_t los;
 
     i32 player_x;
     i32 player_y;
@@ -44,7 +44,7 @@ bool Server_Init(u64 seed)
     server->arena = MemoryArena_Create("server-arena");
     server->run_arena = MemoryArena_Create("server-run-arena");
     server->outbox = ArrayQueue_Create(server->arena, sizeof(event_t), OUTBOX_CAPACITY);
-    Fov_Init(&server->fov, server->arena, FOV_RADIUS);
+    LoS_Init(&server->los, server->arena, LOS_RADIUS);
     Rng_Seed(&server->rng, seed);
     Log(INFO, "server seed=%lu", seed);
 
@@ -116,7 +116,7 @@ static void reveal_visible(void)
     server_t *server = &g_server;
     level_t *level = &server->level;
 
-    Fov_Compute(&server->fov, level, server->player_x, server->player_y);
+    LoS_Compute(&server->los, level, server->player_x, server->player_y);
 
     for (i32 y = server->player_y - REVEAL_RADIUS; y <= server->player_y + REVEAL_RADIUS; y++)
     {
@@ -130,7 +130,7 @@ static void reveal_visible(void)
                 continue;
 
             /* also reveal tiles that borders a visible tile */
-            if (!(tile->flags & FLAG_VISIBLE) && !Fov_TouchesVisibleOpenTile(level, x, y))
+            if (!(tile->flags & FLAG_VISIBLE) && !LoS_TouchesVisibleOpenTile(level, x, y))
                 continue;
 
             tile->flags |= FLAG_REVEALED;
